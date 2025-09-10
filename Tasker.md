@@ -3,7 +3,8 @@
 ### Task List:
 
 ### **IMPORTANT!:**
-- check grouping level for calculating moving average
+- check grouping level for calculating moving average - DONE
+- 
 
 
 ### Part 1 - Data preparation
