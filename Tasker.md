@@ -2,6 +2,9 @@
 
 ### Task List:
 
+### **IMPORTANT!:**
+- check grouping level for calculating moving average
+
 
 ### Part 1 - Data preparation
 
@@ -11,27 +14,33 @@
 
 3. Flatten values, map dimension keys and values for the Features (categories) - DONE  
 
-4. Handle the missing values
+4. Add additional statistical categories:   - DONE
+   - Target lag 
+   - Season by residency 
+   - Season by accommodation type 
+   - Season(month) by country
 
-5. Prepare target and Features for ML model tranining
+5. Handle the missing values - DONE
 
-6. Set up basic ML models
+6. Prepare target and Features for ML model tranining
 
-7. 
+7. Set up basic ML models
 
 8. 
+
+9. 
 
 
 ### Part 2 - UI Features
 
-9. set up config.json and config.py for initial parameters
+10. set up config.json and config.py for initial parameters
 
-10. set up core functions
+11. set up core functions
 
-11. set up ML functions
+12. set up ML functions
 
-12. set up logging
+13. set up logging
 
-13. set up utils
+14. set up utils
 
 
