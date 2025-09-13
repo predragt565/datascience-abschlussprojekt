@@ -269,8 +269,8 @@ def reset_app_state():
 # App Header - Main Title
 # --------------------------------
 
-st.title("🛏️ Eurostat Tourist Overnight Stays 2012-2025 (EU10) by Pred")
-st.markdown("### Interaktive ML-Analyse von EDA zu Vorhersage")
+st.markdown("### 🛏️ Eurostat Tourist Overnight Stays 2012-2025 (EU10) by Pred")
+st.markdown("#### Interaktive ML-Analyse von EDA zu Vorhersage")
 
 # --------------------------------
 # Sidebar (Datei & Einstellungen)
@@ -567,13 +567,179 @@ else:
     # st.success(f"Daten geladen: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
 
     # --- TABS per layout diagram --- #
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab0, tab1, tab2, tab3, tab4 = st.tabs([
+        "Übersicht",
         "🔎 Explorative Analyse",
         "🚨 Ausreißer-Erkennung",
         "🚀 ML Modell Trainieren",
         "📊 Vorhersage & Visualisierungen"
     ])
+# TODO:
+    with tab0:
+        # Übersicht der 
+        with st.expander("Heat map", expanded=True):
+            group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
+            group_slider2 = ["NACEr2", "Aufenthaltsland"]
+            group_slider3 = []
+            group_slider4 = ["Frühling", "Sommer", "Herbst", "Winter"]
 
+            # numeric features only
+            num_cols = [
+                "value", "Monat", "Jahr", "pch_sm",
+                "Month_cycl_sin", "Month_cycl_cos",
+                "MA3", "MA6", "MA12",
+                "Lag_1", "Lag_3", "Lag_12"
+            ]
+            
+            c1, c2, c3 ,c4 = st.columns(4)
+            
+            with c1:
+                choice1 = st.select_slider(f"Choose Country out of {len(group_slider1)}", options=group_slider1)
+                # Build index column name dynamically
+                choice1_idx_col = "Geopolitische_Meldeeinheit_Idx"
+                # Get the corresponding index value
+                choice1_idx_val = df[df["Geopolitische_Meldeeinheit"] == choice1][choice1_idx_col].iloc[0] if not df[df["Geopolitische_Meldeeinheit"] == choice1].empty else None
+
+            with c2:
+                choice2 = st.select_slider(f"Choose Feature Group out of {len(group_slider2)}", options=group_slider2)
+                # st.write(f"You selected: {choice2}")
+            
+            with c3:
+                group_slider3 = sorted(df[choice2].dropna().unique())
+                choice3 = st.select_slider(f"Choose Feature out of {len(group_slider3)}", options=group_slider3)
+                
+                # Build index column name dynamically
+                choice3_idx_col = f"{choice2}_Idx"
+
+                # Get the corresponding index value (assuming 1-to-1 mapping)
+                choice3_idx_val = df[df[choice2] == choice3][choice3_idx_col].iloc[0] if not df[df[choice2] == choice3].empty else None
+                # st.write(f"You selected: {choice3} | {choice3_idx_val}")
+
+            with c4:
+                choice4 = st.select_slider(f"Choose Season out of {len(group_slider4)}", options=group_slider4)
+                # st.write(f"You selected: {choice3}")
+            
+            # Plot a heatmap based on selected choice
+            slider2_map = {
+                "Geopolitische_Meldeeinheit": "Land_Saison", 
+                "NACEr2": "NACEr2_Saison", 
+                "Aufenthaltsland": "Aufenthaltsland_Saison"
+            }
+            composite_column1 = slider2_map.get("Geopolitische_Meldeeinheit", "Unknown_Group")
+            composite_column2 = slider2_map.get(choice2, "Unknown_Group")
+            composite_value1 = f"{choice1_idx_val}_{choice4}"
+            composite_value2 = f"{choice3_idx_val}_{choice4}"
+
+            # --- Filter the DataFrame ---
+            df_filtered = df[
+                (df[composite_column1] == composite_value1) &
+                (df[composite_column2] == composite_value2)
+            ]
+                
+            # --- Show heatmap if data exists ---
+            if not df_filtered.empty:
+                corr = df_filtered[num_cols].corr().round(5)
+                fig11 = px.imshow(
+                    corr,
+                    text_auto=True,
+                    aspect="auto",
+                    title=f"Correlation heatmap: {composite_column2} = {composite_value2} & {composite_column1} = {composite_value1}",
+                    color_continuous_scale="RdBu",
+                    zmin=-1,
+                    zmax=1
+                )
+                fig11.update_traces(textfont=dict(size=10))
+                fig11.update_layout(
+                    xaxis=dict(tickfont=dict(size=12)),
+                    yaxis=dict(tickfont=dict(size=12))
+                )
+                st.plotly_chart(fig11, width='stretch')
+            else:
+               st.warning(f"No data for selection: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
+
+# with tab0:
+    # # Übersicht der 
+    # with st.expander("Heat map 2", expanded=True):
+    #     group_slider1 = ["Geopolitische_Meldeeinheit", "NACEr2", "Aufenthaltsland"]
+    #     group_slider2 = []
+    #     group_slider3 = ["Frühling", "Sommer", "Herbst", "Winter"]
+
+    #     # numeric features only
+    #     num_cols = [
+    #         "value", "Monat", "Jahr", "pch_sm",
+    #         "Month_cycl_sin", "Month_cycl_cos",
+    #         "MA3", "MA6", "MA12",
+    #         "Lag_1", "Lag_3", "Lag_12"
+    #     ]
+        
+    #     c1, c2, c3 = st.columns(3)
+
+    #     # --- Country selection slider (new level added) ---
+    #     with c1:
+    #         country_slider = sorted(df["Geopolitische_Meldeeinheit"].dropna().unique())
+    #         selected_country = st.select_slider(f"Choose Country out of {len(country_slider)}", options=country_slider)
+    #         # st.write(f"You selected: {selected_country}")
+
+    #     with c2:
+    #         choice1 = st.select_slider(f"Choose Feature Group out of {len(group_slider1) - 1}", options=group_slider1[1:])
+    #         # st.write(f"You selected: {choice1}")
+
+    #     with c3:
+    #         group_slider2 = sorted(df[df["Geopolitische_Meldeeinheit"] == selected_country][choice1].dropna().unique())
+    #         choice2 = st.select_slider(f"Choose Feature out of {len(group_slider2)}", options=group_slider2)
+            
+    #         # Build index column name dynamically
+    #         choice2_idx_col = f"{choice1}_Idx"
+
+    #         # Get the corresponding index value (assuming 1-to-1 mapping)
+    #         choice2_idx_val = df[
+    #             (df["Geopolitische_Meldeeinheit"] == selected_country) & (df[choice1] == choice2)
+    #         ][choice2_idx_col].iloc[0] if not df[
+    #             (df["Geopolitische_Meldeeinheit"] == selected_country) & (df[choice1] == choice2)
+    #         ].empty else None
+    #         # st.write(f"You selected: {choice2} | {choice2_idx_val}")
+
+    #     c4 = st.columns(1)[0]
+    #     with c4:
+    #         choice3 = st.select_slider(f"Choose Season out of {len(group_slider3)}", options=group_slider3)
+    #         # st.write(f"You selected: {choice3}")
+
+    #     # Plot a heatmap based on selected choice
+    #     slider1_map = {
+    #         "Geopolitische_Meldeeinheit": "Land_Saison", 
+    #         "NACEr2": "NACEr2_Saison", 
+    #         "Aufenthaltsland": "Aufenthaltsland_Saison"
+    #     }
+    #     composite_column = slider1_map.get(choice1, "Unknown_Group")
+    #     composite_value = f"{choice2_idx_val}_{choice3}"
+
+    #     # --- Filter the DataFrame ---
+    #     df_filtered = df[df[composite_column] == composite_value]
+
+    #     # --- Show heatmap if data exists ---
+    #     if not df_filtered.empty:
+    #         corr = df_filtered[num_cols].corr().round(5)
+    #         fig11 = px.imshow(
+    #             corr,
+    #             text_auto=True,
+    #             aspect="auto",
+    #             title=f"Correlation heatmap: {composite_column} = {composite_value}",
+    #             color_continuous_scale="RdBu",
+    #             zmin=-1,
+    #             zmax=1
+    #         )
+    #         fig11.update_traces(textfont=dict(size=10))
+    #         fig11.update_layout(
+    #             xaxis=dict(tickfont=dict(size=12)),
+    #             yaxis=dict(tickfont=dict(size=12))
+    #         )
+    #         st.plotly_chart(fig11, width='stretch')
+    #     else:
+    #         st.warning(f"No data for selection: `{composite_column}` = `{composite_value}`")
+
+
+    
+    
     with tab1:
         # Hinweise
         st.caption("Hinweis: Kategorie Spalten werden automatish One-Hot-encodiert; numerische werden skaliert (optiona je nach Modell)")
