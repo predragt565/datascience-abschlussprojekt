@@ -83,20 +83,26 @@ st.set_page_config(
 # --------------------------------
 
 # Initialize all the session_state keys
-for key, default in {
-    "df": pd.DataFrame(),
-    "df_from_json": False,
-    "uploaded_filename": None,
-    "df_filtered": None,
-    "cols_for_outlier": [],
-    "outlier_method": None,
-    "mask": None,
-    "show_normalized": False,
-    "model_trained": False,
-    "last_trained_state": {}
-}.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+def initialize_session_defaults():
+    """Initialize all default session_state keys safely."""
+    defaults = {
+        "df": pd.DataFrame(),
+        "df_from_json": False,
+        "uploaded_filename": None,
+        "df_filtered": pd.DataFrame(),
+        "cols_for_outlier": [],
+        "outlier_method": None,
+        "mask": pd.Series(dtype=bool),   # Safe empty mask
+        "show_normalized": False,
+        "model_trained": False,
+        "last_trained_state": {}
+    }
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+# Initialize defaults on app load
+initialize_session_defaults()
 
 # Define a cached fetch JSON URL function to avoid repetative calls
 @st.cache_data(show_spinner=True)
@@ -325,10 +331,8 @@ if use_json and "df_from_json" not in st.session_state:
 if not use_json and st.session_state.get("df_from_json", False):
     st.session_state.df = pd.DataFrame()
     st.session_state.df_from_json = False
-    # for key in ["df", "df_from_json"]:
-    #     if key in st.session_state:
-    #         del st.session_state[key]
     st.session_state.uploaded_filename = None
+    initialize_session_defaults()
 
 
 # --- CSV path (only if not using JSON) ---
@@ -347,6 +351,7 @@ if upload is not None and not use_json:
         # New file uploaded → reset the entire app state EXCEPT filename
         for key in list(st.session_state.keys()):
             del st.session_state[key]
+        initialize_session_defaults()
 
     # Save the current filename into session_state
     if current_filename is not None:
@@ -371,7 +376,7 @@ elif not use_json:
     if upload is None and not st.session_state.get("df_from_json", False):
         if "df" in st.session_state:
             st.session_state.df = pd.DataFrame()
-            # del st.session_state["df"]
+        initialize_session_defaults()
         st.session_state.uploaded_filename = None
     
     sep = st.sidebar.selectbox("CSV-Trenner", possible_separators, index=0)
@@ -399,14 +404,14 @@ try:
         # No data source → clear df
         if "df" in st.session_state:
             st.session_state.df = pd.DataFrame()
-            # del st.session_state["df"]
+        initialize_session_defaults()
         st.sidebar.error("No data source found. Please select JSON or upload a CSV file.")
 
 except Exception as e:
     st.sidebar.error(f"Error while reading CSV/JSON: {e}")
     if "df" in st.session_state:
         st.session_state.df = pd.DataFrame()
-        # del st.session_state["df"]
+    initialize_session_defaults()
 
 
 # Erfolgsmeldung:  

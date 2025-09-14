@@ -97,9 +97,10 @@ def validate_required_columns_csv(df):
     return df
 
 
-def load_prepare_data(json_obj):
+def load_prepare_data(json_obj=None, url=None):
     """
-    Load and preprocess Eurostat JSON object into prepared DataFrame df_anzahl.
+    Load and preprocess Eurostat JSON object (or fetch from URL) into a DataFrame.
+    Either pass a json_obj (dict) OR a url (str).
     """
     # URL of the JSON data
     # url_domain = "https://ec.europa.eu/eurostat/"
@@ -116,16 +117,18 @@ def load_prepare_data(json_obj):
     # url = url_domain + url_site + url_qry_base + url_qry_period_from + url_qry_period_to + url_qry_geo + url_qry_unit + url_qry_resid + url_qry_nace + url_qry_lang
 
     # --- Input validation ---
-    if json_obj is None or not isinstance(json_obj, dict):
-        raise ValueError("Invalid input: 'json_obj' must be a non-null JSON object (dict).")
-    
-    if json_obj:
+    if json_obj is not None:
+        if not isinstance(json_obj, dict):
+            raise ValueError("Invalid input: 'json_obj' must be a dict.")
         # --- Use input object ---
         data = json_obj
-    else:
-        # --- Download and parse the JSON---
-        response = requests.get(url) # BUG:
+    elif url is not None:
+        # --- Download and parse the JSON ---
+        response = requests.get(url)
+        response.raise_for_status()
         data = response.json()
+    else:
+        raise ValueError("Either json_obj or url must be provided.")
 
     
     dims = data['dimension']
