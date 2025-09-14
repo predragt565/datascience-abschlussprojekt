@@ -23,8 +23,11 @@
 5. Handle the missing values - DONE
 
 6. ### !! Important !! - Handling Pandemic period (2020-03 through 2023-04)
-* keep the full dataset but mark the pandemic period with a binary variable. 
-* Then, make sure the train/test split does not accidentally mix in “pandemic months”. 
+* keep the full dataset but mark the pandemic period with a binary variable. - DONE
+* Then, make sure the train/test split does not accidentally mix in “pandemic months”.
+* **Time split**:
+
+  * **Do NOT random split**. Use **time-based train-test split** (e.g., train 2012–2020, validate 2023, test 2024–2025). 
 
 
 ### Part 2 - Explorative data analysis in Streamlit UI
@@ -33,23 +36,32 @@
    - estat_load_data.py - handles transformation of JSON object into DataFrame, automates feature addition from Part 1
    - 
 
-2. Set four tabs:  
-   - 2.1 Explorative Analysis
-   - 2.2 Ausreißer-Erkennung
-   - 2.3 ML Modell Trainineren
-   - 2.4 Vorhersage & Visualisierung
+2. Set the Main section tabs:  
+   - 2.1 Correlation Heatmap
+   - 2.2 Explorative Analysis
+   - 2.3 Ausreißer-Erkennung
+   - 2.4 ML Modell Trainineren
+   - 2.5 Vorhersage & Visualisierung
 
-   2.1. 
+   2.1.
+   - User-controlled filters:
+      * Country (Geopolitische Meldeeinheit)
+      * Accommodation type (NACEr2 EUSTAT categories)
+      * Season
+   - Responsive correlation-heatmap
+   - Export correlation table button
+
+   2.2. 
    - Value distribution
    - Skewness over numeric features
    - Categorical features - category distibution, normalized
 
-   2.2.
+   2.3.
    - Outlier identification and exclusion methods
    - Visual display of normalized or raw values
    - Optional filter selector to exclude outlier values from the model training
 
-   2.3.
+   2.4.
    - ML Modell Training module - In progress
    - ML Performance indicators (R2, RMSE, MAE)
    - Actual vs. predicted
@@ -100,7 +112,7 @@
 
 ### Part 3 - MAchine learning
 
-1. Prepare target and Features for ML model tranining
+1. Prepare target and Features for ML model tranining - IMPORTANT! - include the top 3 correlation features
 
 2. Set up basic ML models
 

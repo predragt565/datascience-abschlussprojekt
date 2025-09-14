@@ -7,24 +7,37 @@
 
 **1.1 General overview**
 
-* `df.info()`, `df.describe()`, `df.isna().sum()` → check missing values, datatypes, ranges.
+* `df_anzahl.info()`, `df_anzahl.describe(include="all")`, `df_anzahl.isna().sum()` → check datatypes, missing values, ranges.
 * Count unique values per categorical column.
 
-**1.2 Target distribution (y = "value")**
+**1.2 Target analysis (y = "value")**
 
-* Plot time series of `value` per country (`Aufenthaltsland`).
-* Plot seasonal decomposition (`statsmodels.tsa.seasonal_decompose`).
+* Distribution of `value` (histogram).
+* Time series plot of `value` per group (`Aufenthaltsland`, `NACEr2`).
+* Seasonal decomposition (trend, seasonality, residuals).
 * Boxplots by `Monat`, `Quartal`, `Saison`.
 
 **1.3 Feature-target relationship**
 
-* Group by season, country, accommodation type (`NACEr2`) → mean overnight stays.
-* Correlation heatmap (numeric features only: `Monat`, `Lag_1`, `Lag_12`, `MA3`, etc.).
+* Group by `Saison`, `Aufenthaltsland`, `NACEr2` → mean of `value`.
+* Correlation heatmap (numeric features only: `Monat`, `Lag_1`, `Lag_12`, `MA3`, `MA6`, `MA12`, etc.).
+* Scatterplots of `value` vs lag/MA features.
 
 **1.4 Outliers & anomalies**
 
-* Check sudden spikes/drops per country.
-* Consider pandemic years (2020–2021) separately.
+* Month-to-month % change per `Aufenthaltsland` to flag sudden spikes/drops.
+* Year-over-year % change to capture seasonal shocks.
+* Compare anomalies inside vs. outside pandemic period.
+
+**1.5 Handling Pandemic period (2020-03 through 2023-04)**
+
+* Keep the full dataset but add a binary `pandemic_dummy` (0/1).
+* Exclude pandemic months from **validation/test splits** if the goal is “normal” forecasts.
+* If retained, ensure lag/rolling features across the gap are handled correctly.
+
+---
+
+
 
 ---
 
@@ -34,13 +47,13 @@
 
 * **Time-based**: `Monat`, `Quartal`, `Saison`, `Jahr`, `Month_cycl_sin`, `Month_cycl_cos`.
 * **Rolling / lagged features**: `MA3`, `MA6`, `MA12`, `Lag_1`, `Lag_3`, `Lag_12`.
-* **Interactions**: `Aufenthaltsland_Saison`, `NACEr2_Saison`, `Land_Monat`.
+* **Interactions**: `Aufenthaltsland_Saison`, `NACEr2_Saison`, `Land_Monat`, `Land_Saison`.
 
 🚀 Additional ideas:
 
 * Public holidays, school holidays, major events (external dataset).
 * Weather indicators (avg temperature, snow, etc. if available).
-* Pandemic dummy variables (2020–2021).
+* Pandemic dummy variables (2020–2021). - DONE
 * Growth rates (`value / lag_12 - 1`).
 
 ---

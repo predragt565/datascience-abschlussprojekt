@@ -38,19 +38,58 @@ def eurostat_url():
     url = url_domain + url_site + url_qry_base + url_qry_period_from + url_qry_period_to + url_qry_geo + url_qry_unit + url_qry_resid + url_qry_nace + url_qry_lang
     return url
 
-def validate_required_columns(df):
+def validate_required_columns_json(df):
     """
-    Validate if required columns are present in the DataFrame.
+    Validate if required columns are present in the DataFrame based on JSON URL fetch.
     Raises ValueError if any are missing.
     """
     required_columns = {
-        "Zeitliche_Frequenz_Idx",
         "Aufenthaltsland_Idx",
-        "Maßeinheit_Idx",
         "NACEr2_Idx",
         "Geopolitische_Meldeeinheit_Idx",
         "JahrMonat",
         "value"
+    }
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(f"Bitte wähle eine geeignete JSON-Datei aus.\nFehlende erforderliche Spalten: {missing}")
+    return df
+
+def validate_required_columns_csv(df):
+    """
+    Validate if required columns are present in the DataFrame based on loaded CSV file.
+    Raises ValueError if any are missing.
+    """
+    required_columns = {
+        "Aufenthaltsland_Idx",
+        "Aufenthaltsland",
+        "NACEr2_Idx",
+        "NACEr2",
+        "Geopolitische_Meldeeinheit_Idx",
+        "Geopolitische_Meldeeinheit",
+        "JahrMonat",
+        "value",
+        "pch_sm",
+        "pch_sm_19",
+        "month",
+        "pch_sm_12",
+        "Monat",
+        "Quartal",
+        "Saison",
+        "Jahr",
+        "Month_cycl_sin",
+        "Month_cycl_cos",
+        "MA3",
+        "MA6",
+        "MA12",
+        "Lag_1",
+        "Lag_3",
+        "Lag_12",
+        "Aufenthaltsland_Saison",
+        "NACEr2_Saison",
+        "Land_Monat",
+        "Land_Saison",
+        "pandemic_dummy"
     }
     missing = required_columns - set(df.columns)
     if missing:
@@ -88,16 +127,6 @@ def load_prepare_data(json_obj):
         response = requests.get(url) # BUG:
         data = response.json()
 
-    # # --- REQUIRED columns ---
-    # required_columns = {
-    #     "Zeitliche_Frequenz_Idx",
-    #     "Aufenthaltsland_Idx",
-    #     "Maßeinheit_Idx",
-    #     "NACEr2_Idx",
-    #     "Geopolitische_Meldeeinheit_Idx",
-    #     "JahrMonat",
-    #     "value"
-    # }
     
     dims = data['dimension']
     values = data['value']
@@ -167,13 +196,13 @@ def load_prepare_data(json_obj):
     df = pd.DataFrame(records)
     
     # --- Validate columns before further processing ---
-    df = validate_required_columns(df)
+    df = validate_required_columns_json(df)
     # missing = required_columns - set(df.columns)
     # if missing:
     #     raise ValueError(f"Missing required columns: {missing}")
 
 
-    # Export to CSV
+    # Export to CSV - before adding additional features
     # csv_filename = "estat_tour_overnight_stays_2012-2025_eu10_de.csv"
     # df.to_csv(csv_filename, index=False)
     # print(f"Exported to {csv_filename}")
@@ -266,7 +295,7 @@ def load_prepare_data(json_obj):
     df_anzahl["Month_cycl_sin"] = np.sin(2 * np.pi * df_anzahl["Monat"] / 12)
     df_anzahl["Month_cycl_cos"] = np.cos(2 * np.pi * df_anzahl["Monat"] / 12)
 
-    # 6. Rolling averages
+    # 6. Moving averages (gleitender Durchschnitt)
     df_anzahl = df_anzahl.sort_values(["Geopolitische_Meldeeinheit_Idx", 
                         "Aufenthaltsland_Idx",
                         "NACEr2_Idx",
@@ -334,7 +363,7 @@ def load_prepare_data(json_obj):
 
     # display(df_anzahl)
 
-    # TODO: --- Check NaN values --- #    <- move this block to Streamlit UI
+    # DONE: --- Check NaN values --- #    <- move this block to Streamlit UI
     # df_anzahl.info()
     # na_counts = df_anzahl.isna().sum()
     # na_counts = na_counts[na_counts > 0]
@@ -345,13 +374,23 @@ def load_prepare_data(json_obj):
     cols_to_fix = ["pch_sm", "pch_sm_19", "pch_sm_12"]
     df_anzahl[cols_to_fix] = df_anzahl[cols_to_fix].fillna(0)
     # df_anzahl.info()
+    
+    # --- Remove all columns with 1 unique value only (Aufenthaltsland- _Idx, Zeitliche_Frequenz- _Idx, Maßeinheit- _Idx)
 
-    # TODO: --- Identify categorical (object/string) columns --- #    <- move this block to Streamlit UI
+    # DONE: --- Identify categorical (object/string) columns --- #    <- move this block to Streamlit UI
     cat_cols = df_anzahl.select_dtypes(include=["object"]).columns
 
     # Count unique values per categorical column
-    # unique_counts = df_anzahl[cat_cols].nunique().sort_values(ascending=False)
+    unique_counts = df_anzahl[cat_cols].nunique().sort_values(ascending=False)
 
+    # Keep only categorical columns with more than 1 unique value
+    valid_cat_cols = unique_counts[unique_counts > 1].index
+
+    # Drop the rest
+    df_anzahl = df_anzahl.drop(columns=[col for col in cat_cols if col not in valid_cat_cols])
+
+    # ----------------------- #
+    
     # print("Unique values per categorical column:\n")
     # print(unique_counts)
 
@@ -360,10 +399,10 @@ def load_prepare_data(json_obj):
     #     print(df_anzahl[col].value_counts().head(10))  # show top 10 categories
     #     print("-" * 50 + "\n")
 
-    # Export to CSV
-    csv_filename = "data/estat_tour_overnight_stays_2012-2025_eu10_de_ext.csv"
-    df_anzahl.to_csv(csv_filename, index=False)
-    print(f"JSON converted Dataframe exported to {csv_filename}")
+    # Export to CSV - including extended features - DISABLED
+    # csv_filename = "data/estat_tour_overnight_stays_2012-2025_eu10_de_ext.csv"
+    # df_anzahl.to_csv(csv_filename, index=False)
+    # print(f"JSON converted Dataframe exported to {csv_filename}")
     # print(df_anzahl.tail(10))
 
     return df_anzahl

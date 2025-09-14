@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import requests # for JSON download
-from data.estat_load_data import eurostat_url, load_prepare_data, validate_required_columns
+from data.estat_load_data import eurostat_url, load_prepare_data, validate_required_columns_json, validate_required_columns_csv
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, PowerTransformer
@@ -81,6 +81,22 @@ st.set_page_config(
 # --------------------------------
 # Helper
 # --------------------------------
+
+# Initialize all the session_state keys
+for key, default in {
+    "df": pd.DataFrame(),
+    "df_from_json": False,
+    "uploaded_filename": None,
+    "df_filtered": None,
+    "cols_for_outlier": [],
+    "outlier_method": None,
+    "mask": None,
+    "show_normalized": False,
+    "model_trained": False,
+    "last_trained_state": {}
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # Define a cached fetch JSON URL function to avoid repetative calls
 @st.cache_data(show_spinner=True)
@@ -270,7 +286,7 @@ def reset_app_state():
 # --------------------------------
 
 st.markdown("### 🛏️ Eurostat Tourist Overnight Stays 2012-2025 (EU10) by Pred")
-st.markdown("#### Interaktive ML-Analyse von EDA zu Vorhersage")
+st.markdown("#### Interaktive Analyse von EDA zu ML-Vorhersage")
 
 # --------------------------------
 # Sidebar (Datei & Einstellungen)
@@ -293,24 +309,7 @@ detected_sep = ","
 
 # --- JSON load path (optional, leaves CSV path untouched) ---
 if use_json and "df_from_json" not in st.session_state:
-    try:
-        # NOTE: URL definition also exists inside load_prepare_data(); we still fetch explicitly here per your layout spec
-        # url_domain = "https://ec.europa.eu/eurostat/"
-        # url_site = "api/dissemination/statistics/1.0/data/tour_occ_nim"
-        # url_qry_base = "?format=JSON"
-        # url_qry_period_from = "&sinceTimePeriod=2012-01"
-        # url_qry_period_to = ""
-        # url_qry_geo = "&geo=DK&geo=DE&geo=EL&geo=ES&geo=HR&geo=IT&geo=PT&geo=FI&geo=SE&geo=NO"
-        # url_qry_unit = "&unit=NR&unit=PCH_SM&unit=PCH_SM_19"
-        # url_qry_resid = "&c_resid=DOM&c_resid=FOR"
-        # url_qry_nace = "&nace_r2=I551&nace_r2=I552&nace_r2=I553"
-        # url_qry_lang = "&lang=de"
-        # url = url_domain + url_site + url_qry_base + url_qry_period_from + url_qry_period_to + url_qry_geo + url_qry_unit + url_qry_resid + url_qry_nace + url_qry_lang
-
-        # resp = requests.get(url)
-        # resp.raise_for_status()
-        # json_obj = resp.json()
-        
+    try:        
         url = eurostat_url()  # 🔗 get URL
         df_json = fetch_eurostat_data(url)  # 🔗 cached fetch
         
@@ -324,9 +323,11 @@ if use_json and "df_from_json" not in st.session_state:
 
 # --- Reset session state if JSON was previously selected but is now unchecked ---
 if not use_json and st.session_state.get("df_from_json", False):
-    for key in ["df", "df_from_json"]:
-        if key in st.session_state:
-            del st.session_state[key]
+    st.session_state.df = pd.DataFrame()
+    st.session_state.df_from_json = False
+    # for key in ["df", "df_from_json"]:
+    #     if key in st.session_state:
+    #         del st.session_state[key]
     st.session_state.uploaded_filename = None
 
 
@@ -369,7 +370,8 @@ elif not use_json:
     # CSV removed or not provided; if current source was CSV, clear stale df
     if upload is None and not st.session_state.get("df_from_json", False):
         if "df" in st.session_state:
-            del st.session_state["df"]
+            st.session_state.df = pd.DataFrame()
+            # del st.session_state["df"]
         st.session_state.uploaded_filename = None
     
     sep = st.sidebar.selectbox("CSV-Trenner", possible_separators, index=0)
@@ -380,7 +382,7 @@ try:
         # JSON selected → ignore CSV completely
         url = eurostat_url()
         df_json = fetch_eurostat_data(url)
-        df = validate_required_columns(df_json)
+        df = validate_required_columns_json(df_json)
         st.session_state.df = df
         st.session_state.df_from_json = True
         st.session_state.uploaded_filename = "eurostat_json"
@@ -388,7 +390,7 @@ try:
     elif upload is not None:
         # Only use CSV if JSON is not selected
         df_csv = read_csv(file=upload, sep=sep)
-        df = validate_required_columns(df_csv)
+        df = validate_required_columns_csv(df_csv)
         st.session_state.df = df
         st.session_state.df_from_json = False
         st.session_state.uploaded_filename = upload.name
@@ -396,27 +398,32 @@ try:
     else:
         # No data source → clear df
         if "df" in st.session_state:
-            del st.session_state["df"]
+            st.session_state.df = pd.DataFrame()
+            # del st.session_state["df"]
         st.sidebar.error("No data source found. Please select JSON or upload a CSV file.")
 
 except Exception as e:
     st.sidebar.error(f"Error while reading CSV/JSON: {e}")
     if "df" in st.session_state:
-        del st.session_state["df"]
+        st.session_state.df = pd.DataFrame()
+        # del st.session_state["df"]
 
 
 # Erfolgsmeldung:  
-if "df" in st.session_state:
-    df = st.session_state.df  
+if not st.session_state.df.empty:
+    df = st.session_state.df
     filename = st.session_state.get("uploaded_filename", "Unbekannt")
     if st.session_state.get("df_from_json", False):
         st.sidebar.success(f"Datei geladen: **Eurostat JSON** | From: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
     else:
-        st.sidebar.success(f"Datei geladen: **{filename}** | From: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
+        st.sidebar.success(f"CSV Datei geladen: **{filename}** | From: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
+# else:
+    # st.sidebar.info("⚠️ Keine Daten geladen – bitte CSV hochladen oder JSON aktivieren")
+
 
 
 # --- Show the rest of the sidebar only if df is valid ---
-if "df" in st.session_state:
+if not st.session_state.df.empty:   
     st.sidebar.header("2) Zielvariable & Split")
     test_size = st.sidebar.slider(
         "Testgröße (%)", 
@@ -431,7 +438,7 @@ if "df" in st.session_state:
         step=1
     )
 
-    st.sidebar.header("3) Modell einstellen")
+    st.sidebar.header("3) ML-Modell einstellen")
     model_name = st.sidebar.selectbox(
         "Algorithmus",
         [
@@ -557,7 +564,7 @@ if "df" in st.session_state:
 # --------------------------------
 
 # Prüfen ob Datenquelle vorhanden ist (CSV ODER JSON)
-if "df" not in st.session_state:
+if st.session_state.df.empty:
     # no data at all
     st.info("Lade eine CSV hoch (links in der Sidebar) oder aktiviere 'Eurostat JSON von URL laden', um zu starten")
 else:
@@ -567,15 +574,15 @@ else:
     # st.success(f"Daten geladen: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
 
     # --- TABS per layout diagram --- #
-    tab0, tab1, tab2, tab3, tab4 = st.tabs([
-        "Übersicht",
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Korrelation-Matrix",
         "🔎 Explorative Analyse",
         "🚨 Ausreißer-Erkennung",
         "🚀 ML Modell Trainieren",
         "📊 Vorhersage & Visualisierungen"
     ])
-# TODO:
-    with tab0:
+# DONE: Responsive Correlation heatmap with slider filters implemented
+    with tab1:
         # Übersicht der 
         with st.expander("Heat map", expanded=True):
             group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
@@ -649,98 +656,25 @@ else:
                     zmax=1
                 )
                 fig11.update_traces(textfont=dict(size=10))
-                fig11.update_layout(
+                fig11.update_layout(    
                     xaxis=dict(tickfont=dict(size=12)),
                     yaxis=dict(tickfont=dict(size=12))
                 )
                 st.plotly_chart(fig11, width='stretch')
+                
+                if st.button("💾 Save currently displayed correlation to CSV"):
+                    corr.to_csv(f"data/correlation_heatmap/correlation_{choice1}_{choice2}_{choice3}_{choice4}.csv")
+
+                
+                with st.expander("Tabellarisch übersicht"):
+                    st.dataframe(df_filtered)
+                
             else:
                st.warning(f"No data for selection: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
 
-# with tab0:
-    # # Übersicht der 
-    # with st.expander("Heat map 2", expanded=True):
-    #     group_slider1 = ["Geopolitische_Meldeeinheit", "NACEr2", "Aufenthaltsland"]
-    #     group_slider2 = []
-    #     group_slider3 = ["Frühling", "Sommer", "Herbst", "Winter"]
-
-    #     # numeric features only
-    #     num_cols = [
-    #         "value", "Monat", "Jahr", "pch_sm",
-    #         "Month_cycl_sin", "Month_cycl_cos",
-    #         "MA3", "MA6", "MA12",
-    #         "Lag_1", "Lag_3", "Lag_12"
-    #     ]
-        
-    #     c1, c2, c3 = st.columns(3)
-
-    #     # --- Country selection slider (new level added) ---
-    #     with c1:
-    #         country_slider = sorted(df["Geopolitische_Meldeeinheit"].dropna().unique())
-    #         selected_country = st.select_slider(f"Choose Country out of {len(country_slider)}", options=country_slider)
-    #         # st.write(f"You selected: {selected_country}")
-
-    #     with c2:
-    #         choice1 = st.select_slider(f"Choose Feature Group out of {len(group_slider1) - 1}", options=group_slider1[1:])
-    #         # st.write(f"You selected: {choice1}")
-
-    #     with c3:
-    #         group_slider2 = sorted(df[df["Geopolitische_Meldeeinheit"] == selected_country][choice1].dropna().unique())
-    #         choice2 = st.select_slider(f"Choose Feature out of {len(group_slider2)}", options=group_slider2)
-            
-    #         # Build index column name dynamically
-    #         choice2_idx_col = f"{choice1}_Idx"
-
-    #         # Get the corresponding index value (assuming 1-to-1 mapping)
-    #         choice2_idx_val = df[
-    #             (df["Geopolitische_Meldeeinheit"] == selected_country) & (df[choice1] == choice2)
-    #         ][choice2_idx_col].iloc[0] if not df[
-    #             (df["Geopolitische_Meldeeinheit"] == selected_country) & (df[choice1] == choice2)
-    #         ].empty else None
-    #         # st.write(f"You selected: {choice2} | {choice2_idx_val}")
-
-    #     c4 = st.columns(1)[0]
-    #     with c4:
-    #         choice3 = st.select_slider(f"Choose Season out of {len(group_slider3)}", options=group_slider3)
-    #         # st.write(f"You selected: {choice3}")
-
-    #     # Plot a heatmap based on selected choice
-    #     slider1_map = {
-    #         "Geopolitische_Meldeeinheit": "Land_Saison", 
-    #         "NACEr2": "NACEr2_Saison", 
-    #         "Aufenthaltsland": "Aufenthaltsland_Saison"
-    #     }
-    #     composite_column = slider1_map.get(choice1, "Unknown_Group")
-    #     composite_value = f"{choice2_idx_val}_{choice3}"
-
-    #     # --- Filter the DataFrame ---
-    #     df_filtered = df[df[composite_column] == composite_value]
-
-    #     # --- Show heatmap if data exists ---
-    #     if not df_filtered.empty:
-    #         corr = df_filtered[num_cols].corr().round(5)
-    #         fig11 = px.imshow(
-    #             corr,
-    #             text_auto=True,
-    #             aspect="auto",
-    #             title=f"Correlation heatmap: {composite_column} = {composite_value}",
-    #             color_continuous_scale="RdBu",
-    #             zmin=-1,
-    #             zmax=1
-    #         )
-    #         fig11.update_traces(textfont=dict(size=10))
-    #         fig11.update_layout(
-    #             xaxis=dict(tickfont=dict(size=12)),
-    #             yaxis=dict(tickfont=dict(size=12))
-    #         )
-    #         st.plotly_chart(fig11, width='stretch')
-    #     else:
-    #         st.warning(f"No data for selection: `{composite_column}` = `{composite_value}`")
-
-
+# TODO: Continue from here - Line chart feature
     
-    
-    with tab1:
+    with tab2:
         # Hinweise
         st.caption("Hinweis: Kategorie Spalten werden automatish One-Hot-encodiert; numerische werden skaliert (optiona je nach Modell)")
         with st.expander("Quellndaten (erste 50 Zeilen)", expanded=False):
@@ -878,7 +812,7 @@ else:
                         )
                         st.plotly_chart(fig4, width='stretch')
 
-    with tab2:
+    with tab3:
         # --------------------------------
         # Outlier Detection (with skewness handling)
         # --------------------------------
@@ -894,7 +828,10 @@ else:
                 default=default_cols[:5] if len(default_cols) > 5 else default_cols[:3],
                 help="Diese Spalten fließen in die Detektion ein (IQR/Z-Score/IsolationForest)."
             )
-            st.session_state.cols_for_outlier = cols_for_outlier  # <-- persist
+            if cols_for_outlier != st.session_state.cols_for_outlier:
+                st.session_state.cols_for_outlier = cols_for_outlier
+            
+            # st.session_state.cols_for_outlier = cols_for_outlier  # <-- persist
 
             # Always define defaults to prevent NameErrors
             mask = pd.Series([False] * len(df))       # Default: no rows are outliers
@@ -1074,7 +1011,7 @@ else:
 
         st.write(f"Datenform für das Training: {st.session_state.df_filtered.shape[0]} Zeilen x {st.session_state.df_filtered.shape[1]} Spalten")
 
-    with tab3:
+    with tab4:
         # --------------------------------
         # Outlier Detection
         # --------------------------------
@@ -1546,11 +1483,15 @@ else:
                     mime="application/octet-stream",
                 )
 
-    with tab4:
+    # --------------------------
+    # 📊 Vorhersage
+    # --------------------------
+    
+    with tab5:
         st.subheader("Vorhersage & Visualisierungen")
         st.info("To be developed")
 
 
 # Footer
-# st.caption("Made with ❤️  |  Unterstützt numerische & kategoriale Features, One-Hot-Encoding, Scaling, Plotly-Visualisierung.")
+# st.caption("Made with ❤️")
 st.caption("🚧 Under Construction / Noch im Bau", width="stretch")
