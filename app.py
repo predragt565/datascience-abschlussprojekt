@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 import csv
 import io
 import os
@@ -50,6 +51,13 @@ CUSTOM_CONTINUOUS=[
         "#005f73"  # Deep teal / ocean
     ]
 
+# use your palettes globally for all PX charts
+px.defaults.color_discrete_sequence = [
+    "#066e69", "#17becf", "#2ca02c", "#66c2a5", "#005f73", "#8dd3c7"
+]
+px.defaults.color_continuous_scale = [
+    "#8dd3c7", "#4ea88b", "#0ea8b9", "#066e69", "#005f73"
+]
 
 # MAIN TITLE
 st.set_page_config(
@@ -92,10 +100,25 @@ def initialize_session_defaults():
         "df_filtered": pd.DataFrame(),
         "cols_for_outlier": [],
         "outlier_method": None,
+        "outliers_removed": False,
         "mask": pd.Series(dtype=bool),   # Safe empty mask
         "show_normalized": False,
         "model_trained": False,
-        "last_trained_state": {}
+        "last_trained_state": {},
+        "tab_ml": False,           # refers to the ML tab
+        # ML params (from widgets)
+        "test_size": 0.20,
+        "random_state": 42,
+        "model_name": "RandomForestRegressor",
+        "alpha_ridge": 0.0,
+        "alpha_lasso": 0.001,
+        "alpha_elasticnet": 0.001,
+        "l1_ratio": 0.5,
+        "n_estimators": 200,
+        "max_depth": 0,
+        "max_features_choice": "sqrt",
+        "learning_rate": 0.1,
+        "apply_skew_correction_global": False,
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -230,12 +253,18 @@ def build_model(model_name: str):
     if model_name == "LinearRegression":
         model = LinearRegression()
     elif model_name == "Ridge":
-        model = Ridge(alpha=alpha, random_state=random_state)
+        model = Ridge( alpha=st.session_state.alpha_ridge,
+    random_state=st.session_state.random_state)
     elif model_name == "Lasso":
-        model = Lasso(alpha=alpha, random_state=random_state, max_iter=10000)
+        model = Lasso(alpha=st.session_state.alpha_lasso, random_state=st.session_state.random_state, max_iter=10000)
     elif model_name == "ElasticNet":
-        model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=random_state)
+        model = ElasticNet(alpha=st.session_state.alpha_elasticnet, l1_ratio=st.session_state.l1_ratio, random_state=st.session_state.random_state)
     elif model_name == "RandomForestRegressor":
+        # Pull widget values from session_state
+        n_estimators = st.session_state.n_estimators
+        max_depth = st.session_state.max_depth
+        max_features_choice = st.session_state.max_features_choice
+        random_state = st.session_state.random_state
         # Mapping der Auswahl auf gültige Werte
         max_d = None if max_depth == 0 else max_depth
         mfc = None if max_features_choice == "Alle (None)" else max_features_choice
@@ -246,14 +275,19 @@ def build_model(model_name: str):
             random_state=random_state
         )
     elif model_name == "GradientBoostingRegressor":
+        # Pull widget values from session_state
+        n_estimators = st.session_state.n_estimators
+        learning_rate = st.session_state.learning_rate
+        max_depth = st.session_state.max_depth
+        max_features_choice = st.session_state.max_features_choice
         # Mapping der Auswahl auf gültige Werte
-        max_d = None if max_depth == 0 else max_depth
+        max_d = 1 if max_depth == 0 else max_depth
         mfc = None if max_features_choice == "Alle (None)" else max_features_choice
         model = GradientBoostingRegressor(
             n_estimators=n_estimators,
             learning_rate=learning_rate,
-            max_depth=max_depth,
-            max_features=max_features_choice
+            max_depth=max_d,
+            max_features=mfc
         )
     return model
 
@@ -298,7 +332,7 @@ st.markdown("#### Interaktive Analyse von EDA zu ML-Vorhersage")
 # Sidebar (Datei & Einstellungen)
 # --------------------------------
 
-# DONE: Add an optional checkbox to call a function in 'estat_load_data.py' to fetch JSON file and preprocess features
+# Add an optional checkbox to call a function in 'estat_load_data.py' to fetch JSON file and preprocess features
 # instead of loading the file; fetched file is assigned to the 'upload' object and passed further on to the next block
 
 # Upload CSV-Datei
@@ -426,9 +460,11 @@ if not st.session_state.df.empty:
     # st.sidebar.info("⚠️ Keine Daten geladen – bitte CSV hochladen oder JSON aktivieren")
 
 
-
-# --- Show the rest of the sidebar only if df is valid ---
-if not st.session_state.df.empty:   
+# --- Show the rest of the sidebar only if df is valid AND ML tab active ---
+if (
+    not st.session_state.df_filtered.empty
+    and st.session_state.get("tab_ml") == True
+):  # BUG:
     st.sidebar.header("2) Zielvariable & Split")
     test_size = st.sidebar.slider(
         "Testgröße (%)", 
@@ -438,7 +474,7 @@ if not st.session_state.df.empty:
 
     random_state = st.sidebar.number_input(
         "Random State",
-        min_value=0,
+        min_value=0,    
         value=42,
         step=1
     )
@@ -462,7 +498,7 @@ if not st.session_state.df.empty:
         pass
 
     if model_name == "Ridge":
-        alpha = st.sidebar.number_input(
+        alpha_ridge = st.sidebar.number_input(
             "alpha (Ridge)",
             min_value=0.0,
             max_value=1.0,
@@ -470,7 +506,7 @@ if not st.session_state.df.empty:
             # format="%.2f"
         )
     elif model_name == "Lasso":
-        alpha = st.sidebar.number_input(
+        alpha_lasso = st.sidebar.number_input(
             "alpha (Lasso)",
             min_value=0.0,
             value=0.001,
@@ -479,7 +515,7 @@ if not st.session_state.df.empty:
         )
 
     elif model_name == "ElasticNet":
-        alpha = st.sidebar.number_input(
+        alpha_elasticnet = st.sidebar.number_input(
             "alpha (ElasticNet)",
             min_value=0.0,
             value=0.001,
@@ -575,20 +611,25 @@ if st.session_state.df.empty:
 else:
     df = st.session_state.df
 
-    # --- If validation passes, show rest of page ---
-    # st.success(f"Daten geladen: {df.shape[0]} Zeilen x {df.shape[1]} Spalten")
-
-    # --- TABS per layout diagram --- #
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    TAB_LABELS = [
         "📊 Korrelation-Matrix",
+        "🏨 Übernachtungen nach Jahr",
         "🔎 Explorative Analyse",
         "🚨 Ausreißer-Erkennung",
         "🚀 ML Modell Trainieren",
         "📊 Vorhersage & Visualisierungen"
-    ])
-# DONE: Responsive Correlation heatmap with slider filters implemented
+    ]
+    
+    # --- TABS per layout diagram --- #
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(TAB_LABELS)
+                                                 
+                                                 
     with tab1:
-        # Übersicht der 
+    # --------------------------------
+    # Responsive Correlation heatmap with slider filters
+    # --------------------------------
+        st.session_state.tab_ml = False
+        # Übersicht der Heatmap
         with st.expander("Heat map", expanded=True):
             group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
             group_slider2 = ["NACEr2", "Aufenthaltsland"]
@@ -606,19 +647,19 @@ else:
             c1, c2, c3 ,c4 = st.columns(4)
             
             with c1:
-                choice1 = st.select_slider(f"Choose Country out of {len(group_slider1)}", options=group_slider1)
+                choice1 = st.select_slider(f"Choose Country out of {len(group_slider1)}", options=group_slider1, key="country_slider")
                 # Build index column name dynamically
                 choice1_idx_col = "Geopolitische_Meldeeinheit_Idx"
                 # Get the corresponding index value
                 choice1_idx_val = df[df["Geopolitische_Meldeeinheit"] == choice1][choice1_idx_col].iloc[0] if not df[df["Geopolitische_Meldeeinheit"] == choice1].empty else None
 
             with c2:
-                choice2 = st.select_slider(f"Choose Feature Group out of {len(group_slider2)}", options=group_slider2)
+                choice2 = st.select_slider(f"Choose Feature Group out of {len(group_slider2)}", options=group_slider2, key="feature_group_slider")
                 # st.write(f"You selected: {choice2}")
             
             with c3:
                 group_slider3 = sorted(df[choice2].dropna().unique())
-                choice3 = st.select_slider(f"Choose Feature out of {len(group_slider3)}", options=group_slider3)
+                choice3 = st.select_slider(f"Choose Feature out of {len(group_slider3)}", options=group_slider3, key="feature_slider")
                 
                 # Build index column name dynamically
                 choice3_idx_col = f"{choice2}_Idx"
@@ -628,7 +669,7 @@ else:
                 # st.write(f"You selected: {choice3} | {choice3_idx_val}")
 
             with c4:
-                choice4 = st.select_slider(f"Choose Season out of {len(group_slider4)}", options=group_slider4)
+                choice4 = st.select_slider(f"Choose Season out of {len(group_slider4)}", options=group_slider4, key="season_slider")
                 # st.write(f"You selected: {choice3}")
             
             # Plot a heatmap based on selected choice
@@ -676,10 +717,302 @@ else:
                 
             else:
                st.warning(f"No data for selection: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
-
+        
+        if st.session_state.df_from_json == True:       
+            with st.expander("🔎 Analytische Befunde", expanded=False):
+                # Load a local markdown file
+                md_content = Path("analytical_findings_correlation_de.md").read_text(encoding="utf-8")
+                # Render as markdown in the app
+                st.markdown(md_content, unsafe_allow_html=False)
+            
+            
 # TODO: Continue from here - Line chart feature
-    
     with tab2:
+    # --------------------------------
+    # Übernachtungen nach Jahr Chart
+    # --------------------------------    
+        st.session_state.tab_ml = False
+        # import plotly.express as px
+        
+        with st.expander("📈 Zeitreihe: Gesamtübernachtungen pro Land", expanded=True):
+
+            group_slider11 = ["NACEr2", "Aufenthaltsland"]
+            group_slider12 = []
+        
+            c11, c12, c13, c14 = st.columns(4)
+            
+            with c11:
+                # choice11 = st.select_slider(f"Choose Feature Group out of {len(group_slider11)}", options=group_slider11, key="feature_group_slider11")
+                pass# st.write(f"You selected: {choice2}")
+            
+            with c12:
+                # group_slider12 = sorted(df[choice11].dropna().unique())
+                # choice12 = st.select_slider(f"Choose Feature out of {len(group_slider12)}", options=group_slider12, key="feature_slider12")
+                
+                # Build index column name dynamically
+                # choice12_idx_col = f"{choice2}_Idx"
+
+                # Get the corresponding index value (assuming 1-to-1 mapping)
+                # choice12_idx_val = df[df[choice11] == choice12][choice12_idx_col].iloc[0] if not df[df[choice11] == choice12].empty else None
+                pass
+            
+            # Ensure JahrMonat is datetime
+            # df["JahrMonat"] = pd.to_datetime(df["JahrMonat"])
+
+            # Group totals per country and month
+            df_grouped = (
+                df.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+            )
+
+            # Plot lines + translucent area
+            fig12 = px.line(
+                df_grouped,
+                x="JahrMonat",
+                y="value",
+                color="Geopolitische_Meldeeinheit_Idx",
+                title="Übernachtungen gesamt nach Land (monatlich)",
+                labels={
+                    "JahrMonat": "Datum",
+                    "value": "Übernachtungszahl",
+                    "Geopolitische_Meldeeinheit_Idx": "Land"
+                },
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+
+            # Add shaded area under each line
+            for trace in fig12.data:
+                trace.update(mode="lines", line=dict(width=2))
+                fig12.add_traces([
+                    dict(
+                        type="scatter",
+                        x=trace.x,
+                        y=trace.y,
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tozeroy",
+                        fillcolor=trace.line.color.replace(")", ",0.2)").replace("rgb", "rgba"),
+                        showlegend=False,
+                        hoverinfo="skip"
+                    )
+                ])
+
+            # Find last date in df_grouped
+            last_date = df_grouped["JahrMonat"].max()
+            start_date = last_date - pd.DateOffset(years=3)
+            # Add rangeslider (zoom control)
+            fig12.update_layout(
+                height=500,
+                xaxis=dict(
+                    range=[start_date, last_date],
+                    rangeselector=dict(
+                        buttons=list([
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all")
+                        ])
+                    ),
+                    rangeslider=dict(visible=True),
+                    type="date"
+                ),
+                yaxis_title="Übernachtungszahl",
+                yaxis_tickformat=",",
+            )
+
+            st.plotly_chart(fig12, use_container_width=True)
+
+        with st.expander("🔎 Detaillierte Analyse mit gleitenden Durchschnitten", expanded=True):
+            
+            #  Version 2
+            
+            # --------------------------------
+            # Übernachtungen nach Jahr Chart
+            # --------------------------------    
+            st.session_state.tab_ml = False
+
+            # 1) Two sliders
+            group_slider21 = ["NACEr2", "Aufenthaltsland"]
+            group_slider22 = []
+
+            c21, c22, c23, c24 = st.columns(4)
+
+            with c21:
+                choice21 = st.select_slider(
+                    f"Choose Feature Group out of {len(group_slider21)}",
+                    options=group_slider21,
+                    key="feature_group_slider21"
+                )
+
+            with c22:
+                group_slider22 = sorted(df[choice21].dropna().unique())
+                choice22 = st.select_slider(
+                    f"Choose Feature out of {len(group_slider22)}",
+                    options=group_slider22,
+                    key="feature_slider22"
+                )
+                # Build index column name dynamically
+                choice22_idx_col = f"{choice21}_Idx"
+                # 1-to-1 mapping label -> *_Idx
+                choice22_idx_val = (
+                    df.loc[df[choice21] == choice22, choice22_idx_col].iloc[0]
+                    if not df.loc[df[choice21] == choice22].empty else None
+                )
+
+            # 2) Ensure datetime
+            if not pd.api.types.is_datetime64_any_dtype(df["JahrMonat"]):
+                df["JahrMonat"] = pd.to_datetime(df["JahrMonat"])
+
+            # 3) Filter by selected group/value (use *_Idx column)
+            if choice22_idx_val is None:
+                st.info("Keine Daten für diese Auswahl.")
+                st.stop()
+
+            filter_col = f"{choice21}_Idx"
+            df_sel = df.loc[df[filter_col] == choice22_idx_val].copy()
+
+            if df_sel.empty:
+                st.info("Keine Daten für diese Auswahl.")
+                st.stop()
+
+            # 4) Aggregate per (JahrMonat, Country)
+            df_grouped = (
+                df_sel.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+            )
+
+            # 5) Compute rolling averages per country
+            df_grouped = df_grouped.sort_values(["Geopolitische_Meldeeinheit_Idx", "JahrMonat"])
+            df_grouped["MA3"] = df_grouped.groupby("Geopolitische_Meldeeinheit_Idx")["value"] \
+                                        .transform(lambda s: s.rolling(3, min_periods=1).mean())
+            df_grouped["MA12"] = df_grouped.groupby("Geopolitische_Meldeeinheit_Idx")["value"] \
+                                        .transform(lambda s: s.rolling(12, min_periods=1).mean())
+
+            # 6) Long format for plotting
+            df_long = df_grouped.melt(
+                id_vars=["JahrMonat", "Geopolitische_Meldeeinheit_Idx"],
+                value_vars=["value", "MA3", "MA12"],
+                var_name="KPI",
+                value_name="Wert"
+            )
+
+            # 7) Plot
+            fig22 = px.line(
+                df_long,
+                x="JahrMonat",
+                y="Wert",
+                color="Geopolitische_Meldeeinheit_Idx",
+                line_dash="KPI",
+                title="Übernachtungen KPI nach Land (Anzahl, MA3, MA12)",
+                labels={
+                    "JahrMonat": "Datum",
+                    "Wert": "Übernachtungszahl",
+                    "Geopolitische_Meldeeinheit_Idx": "Land",
+                    "KPI": "Kennzahl"
+                },
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+
+            # 8) Add translucent shaded area under each line
+            for tr in fig22.data:
+                tr.update(mode="lines", line=dict(width=2))
+                fig22.add_traces([dict(
+                    type="scatter",
+                    x=tr.x, y=tr.y,
+                    mode="lines",
+                    line=dict(width=0),
+                    fill="tozeroy",
+                    fillcolor=str(tr.line.color).replace(")", ",0.2)").replace("rgb", "rgba"),
+                    showlegend=False,
+                    hoverinfo="skip"
+                )])
+
+            # 9) Default zoom: last 3 years
+            last_date = df_long["JahrMonat"].max()
+            start_date = last_date - pd.DateOffset(years=3)
+
+            fig22.update_layout(
+                height=500,
+                xaxis=dict(
+                    range=[start_date, last_date],
+                    rangeselector=dict(
+                        buttons=[
+                            dict(count=6, label="6M", step="month", stepmode="backward"),
+                            dict(count=1, label="1Y", step="year", stepmode="backward"),
+                            dict(step="all")
+                        ]
+                    ),
+                    rangeslider=dict(visible=True),
+                    type="date"
+                ),
+                yaxis_title="Übernachtungszahl",
+                yaxis_tickformat=",",
+            )
+
+            st.plotly_chart(fig22, use_container_width=True)
+
+        with st.expander("Cycle Chart", expanded=False):        
+            # Version 3
+                
+            # # Group totals per country and month
+            # df_grouped3 = (
+            #     df.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)
+            #     .agg({
+            #         "value": "sum",
+            #         "MA3": "mean",
+            #         "MA12": "mean"
+            #     })
+            # )
+
+            # # Melt into long format for multi-line plotting
+            # df_long = df_grouped3.melt(
+            #     id_vars=["JahrMonat", "Geopolitische_Meldeeinheit_Idx"],
+            #     value_vars=["value", "MA3", "MA12"],
+            #     var_name="KPI",
+            #     value_name="Wert"
+            # )
+
+            # # Plot
+            # fig13 = px.line(
+            #     df_long,
+            #     x="JahrMonat",
+            #     y="Wert",
+            #     color="KPI",   # <- one line per metric
+            #     line_dash="Geopolitische_Meldeeinheit_Idx",  # optional: separate countries by dash
+            #     title="KPIs nach Land",
+            #     labels={"JahrMonat": "Datum", "Wert": "Wert", "KPI": "Kennzahl"},
+            #     color_discrete_sequence=px.colors.qualitative.Set2
+            # )
+
+            # # Find last date in df_grouped
+            # last_date = df_grouped["JahrMonat"].max()
+            # start_date = last_date - pd.DateOffset(years=3)
+            # # Add rangeslider (zoom control)
+            # fig12.update_layout(
+            #     height=500,
+            #     xaxis=dict(
+            #         range=[start_date, last_date],
+            #         rangeselector=dict(
+            #             buttons=list([
+            #               dict(count=6, label="6M", step="month", stepmode="backward"),
+            #                 dict(count=1, label="1Y", step="year", stepmode="backward"),
+            #                 dict(step="all")
+            #             ])
+            #         ),
+            #         rangeslider=dict(visible=True),
+            #         type="date"
+            #     ),
+            #     yaxis_title="Übernachtungszahl",
+            #     yaxis_tickformat=",",
+            # )
+
+            # st.plotly_chart(fig13, use_container_width=True)
+            pass
+        
+    
+    
+    with tab3:
+    # --------------------------------
+    # Explorative Analyse
+    # --------------------------------
+        st.session_state.tab_ml = False
         # Hinweise
         st.caption("Hinweis: Kategorie Spalten werden automatish One-Hot-encodiert; numerische werden skaliert (optiona je nach Modell)")
         with st.expander("Quellndaten (erste 50 Zeilen)", expanded=False):
@@ -817,10 +1150,11 @@ else:
                         )
                         st.plotly_chart(fig4, width='stretch')
 
-    with tab3:
-        # --------------------------------
-        # Outlier Detection (with skewness handling)
-        # --------------------------------
+    with tab4:
+        st.session_state.tab_ml = False
+    # --------------------------------
+    # Outlier Detection (with skewness handling)
+    # --------------------------------
 
         with st.expander("🚨 Ausreißer-Erkennung", expanded=True):
             st.markdown("Erkennung auf Basis **selbst gewählter** numerischer Features")
@@ -936,7 +1270,7 @@ else:
 
                 else:
                     cont = st.slider("IsolationForest: Contamination", 0.01, 0.20, 0.05, 0.01)
-                    mask = detect_outliers_iforest(df, cols_for_outlier, contamination=cont, random_state=random_state)
+                    mask = detect_outliers_iforest(df, cols_for_outlier, contamination=cont, random_state=st.session_state.random_state)
                     st.session_state.mask = mask  # <-- persist
                     df_for_plot = df
 
@@ -1010,21 +1344,28 @@ else:
         if st.checkbox("Ausreißer aus den Daten entfernen (für das Training)"):
             filtered_df = df.loc[~mask].copy()
             st.session_state.df_filtered = filtered_df
+            st.session_state.outliers_removed = True   # <- persist flag
             st.success(f"Neue Datenform: {filtered_df.shape[0]} Zeilen x {filtered_df.shape[1]} Spalten")
         else:
             st.session_state.df_filtered = df.copy()
+            st.session_state.outliers_removed = False   # <- persist flag
 
         st.write(f"Datenform für das Training: {st.session_state.df_filtered.shape[0]} Zeilen x {st.session_state.df_filtered.shape[1]} Spalten")
 
-    with tab4:
-        # --------------------------------
-        # Outlier Detection
-        # --------------------------------
 
+    with tab5:
+        st.session_state.tab_ml = True
+        # st.info(f"session_state.active_tab = {st.session_state.get('active_tab', None)}")
+
+    # --------------------------------
+    # ML Model Training
+    # --------------------------------
+
+        st.number_input("Test", 1, 5, 1)
         # --------------------------------
-        # Optional: Apply global skewness correction for modelling
+        # Outlier Detection: Apply global skewness correction for modelling
         # --------------------------------
-        if apply_skew_correction_global:
+        if st.session_state.apply_skew_correction_global:
             try:
                 pt_global = PowerTransformer(method="yeo-johnson")
                 numeric_cols = df.select_dtypes(include=[np.number]).columns
@@ -1035,16 +1376,19 @@ else:
 
         # Erstellen von Feature-Matrix und Label-Vektor:
         df_train = st.session_state.get("df_filtered", df) # pass a saved filtered dataframe from Ausreißer section
-        st.markdown(f"Ausreißer-entfernte Datenform: {df_train.shape[0]} Zeilen x {df_train.shape[1]} Spalten")
+        if st.session_state.get("outliers_removed", False):
+            st.markdown(f"**Ausreißer-entfernte Datenform:** {df_train.shape[0]} Zeilen x {df_train.shape[1]} Spalten")
+        else:
+            st.markdown(f"**Ausreißer-inklusive Datenform:** {df_train.shape[0]} Zeilen x {df_train.shape[1]} Spalten")
         
-        # --- Outlier settings from Tab 2 ---
+        # --- Outlier settings from Tab Ausreßer-Erkennung ---
         cols_for_outlier = st.session_state.get("cols_for_outlier", [])
         method = st.session_state.get("outlier_method", None)
         mask = st.session_state.get("mask", pd.Series(False, index=df.index))
 
-        X = df.drop(columns=[target_col], axis=1)
-        y = df[target_col]
-
+        # Data split
+        X = df_train.drop(columns=[target_col], axis=1)
+        y = df_train[target_col]
 
 
         # Spaltentypen bestimmen:
@@ -1076,7 +1420,7 @@ else:
         )
 
         # Modell erstellen
-        model = build_model(model_name)
+        model = build_model(st.session_state.model_name)
 
         # Pipeline zusammenbauen
         pipe = Pipeline(
@@ -1099,7 +1443,9 @@ else:
             
             # Train/Test-Split einbauen
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=random_state
+                X, y, 
+                test_size=st.session_state.test_size,
+                random_state=st.session_state.random_state
                 )
 
             # Modelltraining
@@ -1329,7 +1675,7 @@ else:
                     try:
                         # Spinner while K-Fold runs
                         with st.spinner("K-Fold durchführen..."):
-                            cv = KFold(n_splits=k, shuffle=True, random_state=random_state)
+                            cv = KFold(n_splits=k, shuffle=True, random_state=st.session_state.random_state)
                             scores = cross_val_score(st.session_state.pipe, X, y, scoring="r2", cv=cv, n_jobs=-1)
 
                         # Ergebnisse und Figure persistent speichern
@@ -1471,30 +1817,34 @@ else:
         # -----------------
 
         with st.expander("💾 Trainiertes Modell speichern", expanded=True):
-            if st.button("Als .joblib exportieren"):
-                buf = io.BytesIO()
-                dump(pipe, buf)
-                buf.seek(0)
+            if st.session_state.get("model_trained", False):
+                if st.button("Als .joblib exportieren"):
+                    buf = io.BytesIO()
+                    dump(pipe, buf)
+                    buf.seek(0)
 
-                # Use uploaded filename if available, else fallback to 'model'
-                uploaded_file = st.session_state.get("uploaded_filename", "dataset")
-                # Remove file extension from uploaded filename, keep only base name
-                base_name = os.path.splitext(uploaded_file)[0]
+                    # Use uploaded filename if available, else fallback to 'model'
+                    uploaded_file = st.session_state.get("uploaded_filename", "dataset")
+                    # Remove file extension from uploaded filename, keep only base name
+                    base_name = os.path.splitext(uploaded_file)[0]
 
-                st.download_button(
-                    label="Download model.joblib",
-                    data=buf,
-                    file_name=f"{base_name}_regression_{model_name}.joblib",
-                    mime="application/octet-stream",
-                )
+                    st.download_button(
+                        label="Download model.joblib",
+                        data=buf,
+                        file_name=f"{base_name}_regression_{st.session_state.model_name}.joblib",
+                        mime="application/octet-stream",
+                    )
+            else:
+                st.warning("⚠️ Kein trainiertes Modell vorhanden.")
 
+    with tab6:
+        # st.session_state.tab_ml = False
     # --------------------------
     # 📊 Vorhersage
     # --------------------------
-    
-    with tab5:
         st.subheader("Vorhersage & Visualisierungen")
         st.info("To be developed")
+        
 
 
 # Footer
