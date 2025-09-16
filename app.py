@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import numpy as np
 import requests # for JSON download
 from data.estat_load_data import eurostat_url, load_prepare_data, validate_required_columns_json, validate_required_columns_csv
+from app.config import load_config
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, PowerTransformer
@@ -85,6 +86,14 @@ st.set_page_config(
 #     </style>
 # """, unsafe_allow_html=True)
 
+# ------------------------------ #
+# --- Initial Configuration ---
+# ------------------------------ #
+
+# Ensure .env variables (if necessary) are available - optional activation
+# load_dotenv()
+# Load default config
+cfg = load_config("config.json")
 
 # --------------------------------
 # Helper
@@ -325,7 +334,7 @@ def reset_app_state():
 # App Header - Main Title
 # --------------------------------
 
-st.markdown("### 🛏️ Eurostat Tourist Overnight Stays 2012-2025 (EU10) by Pred")
+st.markdown("### 🛏️ Eurostat Touristische Übernachtungen 2012-2025 (EU10) by Pred")
 st.markdown("#### Interaktive Analyse von EDA zu ML-Vorhersage")
 
 # --------------------------------
@@ -439,7 +448,7 @@ try:
         if "df" in st.session_state:
             st.session_state.df = pd.DataFrame()
         initialize_session_defaults()
-        st.sidebar.error("No data source found. Please select JSON or upload a CSV file.")
+        st.sidebar.error("Keine Datenquelle gefunden. Bitte JSON auswählen oder CSV-Datei hochladen.")
 
 except Exception as e:
     st.sidebar.error(f"Error while reading CSV/JSON: {e}")
@@ -630,7 +639,7 @@ else:
     # --------------------------------
         st.session_state.tab_ml = False
         # Übersicht der Heatmap
-        with st.expander("Heat map", expanded=True):
+        with st.expander("Korrelations-Heatmap", expanded=True):
             group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
             group_slider2 = ["NACEr2", "Aufenthaltsland"]
             group_slider3 = []
@@ -647,19 +656,19 @@ else:
             c1, c2, c3 ,c4 = st.columns(4)
             
             with c1:
-                choice1 = st.select_slider(f"Choose Country out of {len(group_slider1)}", options=group_slider1, key="country_slider")
+                choice1 = st.select_slider(f"Wähle ein Land aus {len(group_slider1)}", options=group_slider1, key="country_slider")
                 # Build index column name dynamically
                 choice1_idx_col = "Geopolitische_Meldeeinheit_Idx"
                 # Get the corresponding index value
                 choice1_idx_val = df[df["Geopolitische_Meldeeinheit"] == choice1][choice1_idx_col].iloc[0] if not df[df["Geopolitische_Meldeeinheit"] == choice1].empty else None
 
             with c2:
-                choice2 = st.select_slider(f"Choose Feature Group out of {len(group_slider2)}", options=group_slider2, key="feature_group_slider")
+                choice2 = st.select_slider(f"Wähle eine Featuregruppe aus {len(group_slider2)}", options=group_slider2, key="feature_group_slider")
                 # st.write(f"You selected: {choice2}")
             
             with c3:
                 group_slider3 = sorted(df[choice2].dropna().unique())
-                choice3 = st.select_slider(f"Choose Feature out of {len(group_slider3)}", options=group_slider3, key="feature_slider")
+                choice3 = st.select_slider(f"Wähle eine Feature aus {len(group_slider3)}", options=group_slider3, key="feature_slider")
                 
                 # Build index column name dynamically
                 choice3_idx_col = f"{choice2}_Idx"
@@ -669,7 +678,7 @@ else:
                 # st.write(f"You selected: {choice3} | {choice3_idx_val}")
 
             with c4:
-                choice4 = st.select_slider(f"Choose Season out of {len(group_slider4)}", options=group_slider4, key="season_slider")
+                choice4 = st.select_slider(f"Wähle eine Saison aus {len(group_slider4)}", options=group_slider4, key="season_slider")
                 # st.write(f"You selected: {choice3}")
             
             # Plot a heatmap based on selected choice
@@ -696,7 +705,7 @@ else:
                     corr,
                     text_auto=True,
                     aspect="auto",
-                    title=f"Correlation heatmap: {composite_column2} = {composite_value2} & {composite_column1} = {composite_value1}",
+                    title=f"Korrelations-Heatmap: {composite_column2} = {composite_value2} & {composite_column1} = {composite_value1}",
                     color_continuous_scale="RdBu",
                     zmin=-1,
                     zmax=1
@@ -708,7 +717,7 @@ else:
                 )
                 st.plotly_chart(fig11, width='stretch')
                 
-                if st.button("💾 Save currently displayed correlation to CSV"):
+                if st.button("💾 Aktuell angezeigte Korrelation als CSV speichern"):
                     corr.to_csv(f"data/correlation_heatmap/correlation_{choice1}_{choice2}_{choice3}_{choice4}.csv")
 
                 
@@ -716,7 +725,7 @@ else:
                     st.dataframe(df_filtered)
                 
             else:
-               st.warning(f"No data for selection: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
+               st.warning(f"Keine Daten zur Auswahl: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
         
         if st.session_state.df_from_json == True:       
             with st.expander("🔎 Analytische Befunde", expanded=False):
@@ -726,7 +735,7 @@ else:
                 st.markdown(md_content, unsafe_allow_html=False)
             
             
-# TODO: Continue from here - Line chart feature
+# DONE: Line chart feature
     with tab2:
     # --------------------------------
     # Übernachtungen nach Jahr Chart
@@ -825,19 +834,21 @@ else:
             #  Version 2
             
             # --------------------------------
-            # Übernachtungen nach Jahr Chart
+            # Übernachtungen KPI nach Jahr Chart
             # --------------------------------    
             st.session_state.tab_ml = False
 
-            # 1) Two sliders
+            # 1) Three sliders
             group_slider21 = ["NACEr2", "Aufenthaltsland"]
             group_slider22 = []
+            land = sorted(df["Geopolitische_Meldeeinheit"].dropna().unique())
+            group_slider23 = ["Alle Länder"] + land
 
             c21, c22, c23, c24 = st.columns(4)
 
             with c21:
                 choice21 = st.select_slider(
-                    f"Choose Feature Group out of {len(group_slider21)}",
+                    f"Wähle eine Featuregruppe aus {len(group_slider21)}",
                     options=group_slider21,
                     key="feature_group_slider21"
                 )
@@ -845,7 +856,7 @@ else:
             with c22:
                 group_slider22 = sorted(df[choice21].dropna().unique())
                 choice22 = st.select_slider(
-                    f"Choose Feature out of {len(group_slider22)}",
+                    f"Wähle eine Feature aus {len(group_slider22)}",
                     options=group_slider22,
                     key="feature_slider22"
                 )
@@ -855,6 +866,13 @@ else:
                 choice22_idx_val = (
                     df.loc[df[choice21] == choice22, choice22_idx_col].iloc[0]
                     if not df.loc[df[choice21] == choice22].empty else None
+                )
+                
+            with c23:
+                choice23 = st.select_slider(
+                    f"Wähle ein Land aus {len(group_slider23)-1}",
+                    options=group_slider23,
+                    key="feature_slider23"
                 )
 
             # 2) Ensure datetime
@@ -866,9 +884,18 @@ else:
                 st.info("Keine Daten für diese Auswahl.")
                 st.stop()
 
-            filter_col = f"{choice21}_Idx"
-            df_sel = df.loc[df[filter_col] == choice22_idx_val].copy()
+            # Filter by feature group ID
+            df_sel = df.loc[df[choice22_idx_col] == choice22_idx_val].copy()
 
+            # If a specific country is selected, filter further
+            if choice23 != "Alle Länder":
+                # get the matching ID for the selected country
+                land_idx = df.loc[
+                    df["Geopolitische_Meldeeinheit"] == choice23, 
+                    "Geopolitische_Meldeeinheit_Idx"
+                ].iloc[0]
+                df_sel = df_sel.loc[df_sel["Geopolitische_Meldeeinheit_Idx"] == land_idx]
+            
             if df_sel.empty:
                 st.info("Keine Daten für diese Auswahl.")
                 st.stop()
@@ -881,9 +908,9 @@ else:
             # 5) Compute rolling averages per country
             df_grouped = df_grouped.sort_values(["Geopolitische_Meldeeinheit_Idx", "JahrMonat"])
             df_grouped["MA3"] = df_grouped.groupby("Geopolitische_Meldeeinheit_Idx")["value"] \
-                                        .transform(lambda s: s.rolling(3, min_periods=1).mean())
+                                        .transform(lambda s: s.rolling(3, min_periods=1).mean().astype(int))
             df_grouped["MA12"] = df_grouped.groupby("Geopolitische_Meldeeinheit_Idx")["value"] \
-                                        .transform(lambda s: s.rolling(12, min_periods=1).mean())
+                                        .transform(lambda s: s.rolling(12, min_periods=1).mean().astype(int))
 
             # 6) Long format for plotting
             df_long = df_grouped.melt(
@@ -949,6 +976,7 @@ else:
             st.plotly_chart(fig22, use_container_width=True)
 
         with st.expander("Cycle Chart", expanded=False):        
+            
             # Version 3
                 
             # # Group totals per country and month
@@ -1109,7 +1137,7 @@ else:
             else:
                 tabs[0].write("Wähle Features aus, um Scatter-/Box-Plots zu sehen")
             # ---- END original EDA block ----
-
+# TODO:
         # --------------------------------
         # Skewness-Analyse der numerischen Features (Plotly)
         # --------------------------------
