@@ -23,22 +23,22 @@ Dieses Projekt konzentriert sich auf die Analyse von Daten zu Übernachtungstren
 └── 📁AbschlussprojektDS
     └── 📁app
         └── 📁img
-        ├── config.py
-        ├── core.py
-        ├── logging_setup.py
-        ├── ml_functions.py
-        ├── utils.py
-    └── 📁dashboard
+        ├── config.py (+)
+        ├── core.py ( )
+        ├── logging_setup.py (-)
+        ├── ml_functions.py ( )
+        ├── utils.py (-)
+    └── 📁dashboard (-)
     └── 📁data
+        └── 📁correlation_heatmap
+        └── 📁correlation_heatmap_charts
         ├── estat_load_data.py
-        ├── estat_tour_overnight_stays_2012-2025_eu10_de.csv
+        ├── estat_tour_overnight_stays_2012-2025_eu10_de.csv (remove)
         ├── estat_tour_overnight_stays_eu10.ipynb
     └── 📁plots
     ├── .gitignore
-    ├── AbschlussprojektDS.pdf
-    ├── alerts.log
     ├── app.py
-    ├── config.json
+    ├── config.json (+)
     ├── LICENSE
     ├── main.py
     ├── README.md

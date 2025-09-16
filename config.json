@@ -1,0 +1,86 @@
+{
+  "log": {
+    "level": "INFO",
+    "to_file": true,
+    "file_path": "alerts.log",
+    "file_max_bytes": 1000000,
+    "file_backup_count": 3
+  },
+ 
+  "threshold_pct": 0.02,
+  "state_file": "alert_state.json",
+
+  "features_ridge_model": [
+    "MA3",
+    "MA6",
+    "MA12",
+    "Lag_1",
+    "Lag_3",
+    "Lag_12",
+    "pch_sm",
+    "pch_sm_19",
+    "NACEr2_Saison",
+    "Land_Saison",
+    "Aufenthaltsland_Saison",
+    "Month_cycl_sin",
+    "Month_cycl_cos",
+    "Jahr",
+    "pandemic_dummy"
+  ],
+
+  "country": {
+    "Deutschland": {
+      "land_idx": "DE",
+      "land_group": "Deutschland",
+      "land_group_idx": "de"
+    },
+    "Spanien": {
+      "land_idx": "ES",
+      "land_group": "Mittelmeergroßezielländer",
+      "land_group_idx": "medl"
+    },
+    "Portugal": {
+      "land_idx": "PT",
+      "land_group": "Mittelmeerkleinerezielländer",
+      "land_group_idx": "meds"
+    },
+    "Italien": {
+      "land_idx": "IT",
+      "land_group": "Mittelmeergroßezielländer",
+      "land_group_idx": "medl"
+    },
+    "Kroatien": {
+      "land_idx": "HR",
+      "land_group": "Mittelmeerkleinerezielländer",
+      "land_group_idx": "meds"
+    },
+    "Griechenland": {
+      "land_idx": "EL",
+      "land_group": "Mittelmeerkleinerezielländer",
+      "land_group_idx": "meds"
+    },
+    "Dänemark": {
+      "land_idx": "DK",
+      "land_group": "Nordischezielländer",
+      "land_group_idx": "scandi"
+    },
+    "Norwegen": {
+      "land_idx": "NR",
+      "land_group": "Nordischezielländer",
+      "land_group_idx": "scandi"
+    },
+    "Schweden": {
+      "land_idx": "SW",
+      "land_group": "Nordischezielländer",
+      "land_group_idx": "scandi"
+    },
+    "Finnland": {
+      "land_idx": "FI",
+      "land_group": "Nordischezielländer",
+      "land_group_idx": "scandi"
+    }
+  }
+
+
+
+}
