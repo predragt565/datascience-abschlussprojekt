@@ -1,4 +1,4 @@
-# 🛏️ Eurostat Touristische Übernachtungen 2012–2025 (EU10) Trendanalyse
+## 🛏️ Eurostat Touristische Übernachtungen 2012–2025 (EU10) Trendanalyse
 
 ### Analytische Befunde – Korrelations-Heatmap
 

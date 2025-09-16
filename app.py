@@ -10,6 +10,7 @@ import numpy as np
 import requests # for JSON download
 from data.estat_load_data import eurostat_url, load_prepare_data, validate_required_columns_json, validate_required_columns_csv
 from app.config import load_config
+from app.core import show_distribution, log_transform_and_skewness, skewness_summary, render_skew_table
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, PowerTransformer
@@ -827,7 +828,7 @@ else:
                 yaxis_tickformat=",",
             )
 
-            st.plotly_chart(fig12, use_container_width=True)
+            st.plotly_chart(fig12, width='stretch')
 
         with st.expander("🔎 Detaillierte Analyse mit gleitenden Durchschnitten", expanded=True):
             
@@ -973,7 +974,7 @@ else:
                 yaxis_tickformat=",",
             )
 
-            st.plotly_chart(fig22, use_container_width=True)
+            st.plotly_chart(fig22, width='stretch')
 
         with st.expander("Cycle Chart", expanded=False):        
             
@@ -1031,7 +1032,7 @@ else:
             #     yaxis_tickformat=",",
             # )
 
-            # st.plotly_chart(fig13, use_container_width=True)
+            # st.plotly_chart(fig13, width='stretch')
             pass
         
     
@@ -1052,7 +1053,7 @@ else:
         target_col = st.selectbox("Zielvariable (nur numerisch)", num_cols)
 
         # Einfache EDA:
-        with st.expander("🔎 Explorative Analyse", expanded=True):
+        with st.expander("🔎 Explorative Analyse", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**Numerische Übersicht**")
@@ -1137,46 +1138,70 @@ else:
             else:
                 tabs[0].write("Wähle Features aus, um Scatter-/Box-Plots zu sehen")
             # ---- END original EDA block ----
-# TODO:
+# TODO: In progress
         # --------------------------------
         # Skewness-Analyse der numerischen Features (Plotly)
         # --------------------------------
 
-        with st.expander("📈 Skewness der numerischen Features", expanded=False):
+        with st.expander("📈 Skewness der numerischen Features", expanded=True):
             # st.subheader("📈 Skewness der numerischen Features")
 
             if len(num_cols) == 0:
                 st.info("Keine numerischen Spalten verfügbar für Skewness-Analyse.")
             else:
-                # Correct formula for rows
-                rows = (len(num_cols) + 1) // 2
+                # ✅ Checkbox for normalized plots
+                show_normalized = st.checkbox(
+                    "📐 Normalisierte Ansicht anzeigen",
+                    value=False,
+                    help="Zeigt Histogramme mit transformierten (log1p) Werten an"
+                )
 
-                # Force Streamlit to display this BEFORE columns
-                st.markdown(f"**Diagrammzeilen:** {rows}")
-                st.markdown("---")  # optional visual separator for clarity
+                df_plot = df.copy()
+                if show_normalized:
+                    try:
+                        df_plot = log_transform_and_skewness(df_plot, num_cols)
+                        st.success("✅ Normalisierte (log1p) Werte für Histogramme angezeigt.")
+                    except Exception as e:
+                        st.error(f"Fehler bei Transformation: {e}")
+                        df_plot = df.copy()
+
+                # Rows/cols layout for subplots
+                n_features = len(num_cols)
+                n_cols = 2  # two plots per row
+                n_rows = (n_features + n_cols - 1) // n_cols
+
+                fig_skew = show_distribution(
+                    dataset=df_plot,
+                    columns_list=num_cols,
+                    rows=n_rows,
+                    cols=n_cols,
+                    title="Verteilungen & Skewness"
+                )
+                st.plotly_chart(fig_skew, width='stretch')
                 
-                col1, col2 = st.columns(2)
-                plot_cols = [col1, col2]
-
-                for idx, col in enumerate(num_cols):
-                    current_col = plot_cols[idx % 2]
-                    with current_col:
-                        df_col = df[col].dropna()
-                        sk = df_col.skew()              # -> bias=False
-                        # sk_stat = stats.skew(df_col)  # -> bias=True
-                        n = len(df_col)
-
-                        fig4 = px.histogram(
-                            df,
-                            x=col,
-                            nbins=40,
-                            title = f"{col} | Skew = {sk:.4f} | n={n}"
-                        )
-                        fig4.update_layout(
-                            height=300,
-                            margin=dict(l=10, r=10, t=40, b=10)
-                        )
-                        st.plotly_chart(fig4, width='stretch')
+                # summary table
+                skew_table = skewness_summary(df, numeric_columns=num_cols, transform="log1p", show=False)
+                render_skew_table(skew_table, title="Skewness-Übersicht (nach log1p)")
+                
+                # Info box: clarify difference between transformations
+                st.info(
+                    "ℹ️ **Hinweis zur Transformation:**\n\n"
+                    "- **Normalisierte Ansicht (log1p)** verändert die Datenwerte, um schiefe Verteilungen zu stabilisieren "
+                    "und Histogramme symmetrischer darzustellen. Dies ist eine *Feature-Transformation*.\n"
+                    "- **Ausreißer-Erkennung** (IQR, Z-Score, IsolationForest) verfolgt ein anderes Ziel: "
+                    "extreme Beobachtungen zu identifizieren oder ggf. zu entfernen. "
+                    "Dabei kann optional eine Yeo–Johnson-Transformation angewendet werden, "
+                    "um die Erkennung robuster zu machen.\n\n"
+                    "👉 Skewness-Korrektur und Ausreißer-Erkennung sind **verschiedene Schritte**. "
+                    "Erst wird eine Transformation angewendet (z. B. log1p), danach kann eine Ausreißer-Erkennung sinnvoll erfolgen."
+                )
+            
+                with st.expander("🔎 Skewness-Transformation Befunde", expanded=False):
+                    # Load a local markdown file
+                    md_content2 = Path("skew_transform_findings_de.md").read_text(encoding="utf-8")
+                    # Render as markdown in the app
+                    st.markdown(md_content2, unsafe_allow_html=False)
+            
 
     with tab4:
         st.session_state.tab_ml = False

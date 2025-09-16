@@ -1,4 +1,4 @@
-# 🛏️ Eurostat Trourist Overnight Stays 2012-2025 (EU10) Trend Analysis
+## 🛏️ Eurostat Trourist Overnight Stays 2012-2025 (EU10) Trend Analysis
 
 ### Analytical findings - Correlation heatmap
 

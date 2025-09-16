@@ -1,0 +1,16 @@
+﻿Feature,Skewness_before,Skewness_after_log1p
+pch_sm,42.015,
+pch_sm_12,11.163,
+pch_sm_19,6.888,
+Lag_12,3.424,-1.907
+Lag_3,3.305,-2.055
+Lag_1,3.278,-1.646
+value,3.259,-1.122
+MA3,3.185,-2.166
+MA6,3.05,-2.6
+MA12,2.96,-2.39
+pandemic_dummy,1.255,1.255
+Month_cycl_sin,-0.053,
+Monat,0.048,-0.658
+Jahr,0.015,0.012
+Month_cycl_cos,0.009,
