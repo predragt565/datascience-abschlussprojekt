@@ -731,7 +731,7 @@ else:
         if st.session_state.df_from_json == True:       
             with st.expander("🔎 Analytische Befunde", expanded=False):
                 # Load a local markdown file
-                md_content = Path("analytical_findings_correlation_de.md").read_text(encoding="utf-8")
+                md_content = Path("markdown/analytical_findings_correlation_de.md").read_text(encoding="utf-8")
                 # Render as markdown in the app
                 st.markdown(md_content, unsafe_allow_html=False)
             
@@ -1198,7 +1198,7 @@ else:
             
                 with st.expander("🔎 Skewness-Transformation Befunde", expanded=False):
                     # Load a local markdown file
-                    md_content2 = Path("skew_transform_findings_de.md").read_text(encoding="utf-8")
+                    md_content2 = Path("markdown/skew_transform_findings_de.md").read_text(encoding="utf-8")
                     # Render as markdown in the app
                     st.markdown(md_content2, unsafe_allow_html=False)
             
