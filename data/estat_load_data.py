@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 import numpy as np
+import streamlit as st
 
 import sys
 import json
@@ -38,6 +39,7 @@ def eurostat_url():
     url = url_domain + url_site + url_qry_base + url_qry_period_from + url_qry_period_to + url_qry_geo + url_qry_unit + url_qry_resid + url_qry_nace + url_qry_lang
     return url
 
+@st.cache_data
 def validate_required_columns_json(df):
     """
     Validate if required columns are present in the DataFrame based on JSON URL fetch.
@@ -55,6 +57,7 @@ def validate_required_columns_json(df):
         raise ValueError(f"Bitte wähle eine geeignete JSON-Datei aus.\nFehlende erforderliche Spalten: {missing}")
     return df
 
+@st.cache_data
 def validate_required_columns_csv(df):
     """
     Validate if required columns are present in the DataFrame based on loaded CSV file.

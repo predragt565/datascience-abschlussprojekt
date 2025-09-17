@@ -22,6 +22,7 @@ from sklearn.metrics import r2_score, mean_squared_error
 # -------------------------------
 # Show data distribution skewness
 # -------------------------------
+@st.cache_data
 def show_distribution(
     dataset: pd.DataFrame,
     columns_list,
@@ -78,6 +79,7 @@ def show_distribution(
 # ------------------------------
 # Transform skewness of num cols
 # ------------------------------
+@st.cache_data
 def log_transform_and_skewness(df, numeric_columns, show_skewness=False):
     # Kopie:
     df_transfored = df.copy()
@@ -166,6 +168,7 @@ def evaluate_regression(
 # --------------------------
 # Skewness Summary table
 # --------------------------
+@st.cache_data
 def skewness_summary(
     df: pd.DataFrame,
     numeric_columns: list = None,

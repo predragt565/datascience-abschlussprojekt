@@ -148,6 +148,18 @@ def fetch_eurostat_data(url: str):
 def read_csv(file, sep):
     return pd.read_csv(file, sep=sep)
 
+@st.cache_data
+def compute_corr(df: pd.DataFrame, num_cols: list):
+    """Compute correlation matrix for numeric columns."""
+    return df[num_cols].corr(numeric_only=True)
+
+@st.cache_data
+def compute_pairwise_corr(df: pd.DataFrame, cols: list):
+    """Return pairwise correlations for given columns."""
+    return df[cols].corr(numeric_only=True)
+
+
+@st.cache_data
 def detect_outliers_iqr(df: pd.DataFrame, cols, factor=1.5):
     # Start mit "leerer" Series (False=kein Ausreßer):
     mask = pd.Series(False, index=df.index)     # index is used to set a size for the mask to match size of df
@@ -163,6 +175,7 @@ def detect_outliers_iqr(df: pd.DataFrame, cols, factor=1.5):
     
     return mask
 
+@st.cache_data
 def detect_outliers_z(df: pd.DataFrame, cols, threshold=3):
     """
     Vectorized Z-Score outlier detection using NumPy.
@@ -187,7 +200,7 @@ def detect_outliers_z(df: pd.DataFrame, cols, threshold=3):
     # Return as a Pandas Series aligned to df.index
     return pd.Series(mask, index=df.index)
 
-
+@st.cache_data
 def detect_outliers_iforest(df, cols, contamination=0.05, n_estimators=200, random_state=42):
     """
     Detects outliers using IsolationForest.
@@ -217,6 +230,30 @@ def detect_outliers_iforest(df, cols, contamination=0.05, n_estimators=200, rand
     mask.loc[df_clean.index] = labels == -1
 
     return mask
+
+@st.cache_data
+def yeo_johnson_transform(df: pd.DataFrame, cols: list):
+    pt = PowerTransformer(method="yeo-johnson")
+    out = df.copy()
+    out[cols] = pt.fit_transform(out[cols])
+    return out
+
+@st.cache_data
+def ts_grouped_by_country(df: pd.DataFrame):
+    # Ensure dtype once (much faster if done before grouping)
+    if not pd.api.types.is_datetime64_any_dtype(df["JahrMonat"]):
+        df = df.copy()
+        df["JahrMonat"] = pd.to_datetime(df["JahrMonat"])
+    return (
+        df.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+    )
+
+@st.cache_data
+def group_by_month_country(df_sel: pd.DataFrame):
+    """Aggregate monthly totals per country for a filtered subset."""
+    return (
+        df_sel.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+    )
 
 
 def infer_column_types(df: pd.DataFrame):
@@ -770,9 +807,10 @@ else:
             # df["JahrMonat"] = pd.to_datetime(df["JahrMonat"])
 
             # Group totals per country and month
-            df_grouped = (
-                df.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
-            )
+            # df_grouped_old = (
+            #     df.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+            # )
+            df_grouped = ts_grouped_by_country(df)
 
             # Plot lines + translucent area
             fig12 = px.line(
@@ -902,9 +940,10 @@ else:
                 st.stop()
 
             # 4) Aggregate per (JahrMonat, Country)
-            df_grouped = (
-                df_sel.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
-            )
+            df_grouped = group_by_month_country(df_sel)
+            # df_grouped_old = (
+            #     df_sel.groupby(["JahrMonat", "Geopolitische_Meldeeinheit_Idx"], as_index=False)["value"].sum()
+            # )
 
             # 5) Compute rolling averages per country
             df_grouped = df_grouped.sort_values(["Geopolitische_Meldeeinheit_Idx", "JahrMonat"])
@@ -1083,7 +1122,8 @@ else:
             # Korrelationsmatrix:
             with c4:
                 if len(num_cols) > 1:
-                    corr = df[num_cols].corr(numeric_only=True)
+                    corr = compute_corr(df, num_cols) # cached
+                    # corr = df[num_cols].corr(numeric_only=True)
                     fig2 = px.imshow(
                         corr,
                         text_auto=False,
@@ -1100,7 +1140,7 @@ else:
             show_cols = st.multiselect(
                 "Features für Scatter-Plot auswählen",
                 feature_candidates,
-                feature_candidates[:4]
+                feature_candidates[:2]
                 )
             tabs = st.tabs([f"📑 {c}" for c in show_cols] or ["Hinweis"])
             
@@ -1217,7 +1257,7 @@ else:
             cols_for_outlier = st.multiselect(
                 "Spalten für die Ausreßer-Erkennung",
                 options=default_cols,
-                default=default_cols[:5] if len(default_cols) > 5 else default_cols[:3],
+                default=default_cols[:3] if len(default_cols) > 5 else default_cols[:3],
                 help="Diese Spalten fließen in die Detektion ein (IQR/Z-Score/IsolationForest)."
             )
             if cols_for_outlier != st.session_state.cols_for_outlier:
@@ -1291,8 +1331,7 @@ else:
                     # Transformation, falls gewünscht
                     if apply_transform:
                         try:
-                            pt = PowerTransformer(method="yeo-johnson")
-                            df_proc[cols_for_outlier] = pt.fit_transform(df_proc[cols_for_outlier])
+                            df_proc = yeo_johnson_transform(df_proc, cols_for_outlier)
                             st.success("✅ Yeo-Johnson-Transformation **nur für Visualisierung** erfolgreich angewendet!")
                             transformed_successfully = True
                         except Exception as e:
