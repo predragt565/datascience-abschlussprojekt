@@ -82,14 +82,14 @@ def show_distribution(
 @st.cache_data
 def log_transform_and_skewness(df, numeric_columns, show_skewness=False):
     # Kopie:
-    df_transfored = df.copy()
+    df_transformed = df.copy()
     
     # Transformation anwenden:
-    df_transfored[numeric_columns] = np.log1p(df_transfored[numeric_columns])
+    df_transformed[numeric_columns] = np.log1p(df_transformed[numeric_columns])
     
     # Skewness vorher und nacher:
     before_skew = df[numeric_columns].skew()
-    after_skew = df_transfored[numeric_columns].skew()
+    after_skew = df_transformed[numeric_columns].skew()
     
     # Skewness anzeigen:
     if show_skewness:
@@ -99,7 +99,7 @@ def log_transform_and_skewness(df, numeric_columns, show_skewness=False):
         })
         print(skew_df)
     
-    return df_transfored
+    return df_transformed
 
 # -------------------
 # Evaluate Regression

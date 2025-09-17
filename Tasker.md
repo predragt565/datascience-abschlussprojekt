@@ -110,13 +110,48 @@
 
 
 
-### Part 3 - MAchine learning
+### Part 3 - Machine learning
 
 1. Prepare target and Features for ML model tranining - IMPORTANT! - include the top 3 correlation features
 
 2. Set up basic ML models
 
 3. Train a model, save as pickle, use later with UI for prediction instead of training it every time (ml_01 lesson)
+
+
+---
+
+### 🎯 Goal 1: Mixed Transformation Pipeline
+
+* Implement a **hybrid transformation**:
+
+  1. Apply **`log1p`** to strictly positive features (like counts, lags, totals).
+  2. Apply **`Yeo–Johnson`** to features that can be zero or negative (like % change features).
+  3. Combine them into **`df_transformed`**.
+* Then pass this `df_transformed` through **outlier detection/removal** (Tab 4) → `df_filtered`.
+* Feed `df_filtered` into **ML training** (Tab 5).
+
+---
+
+### 🎯 Goal 2: Model training & persistence
+
+* Train multiple candidate models (e.g., Ridge, LinearRegression, RandomForest, etc.).
+* Use backtesting (walk-forward) for time-series validation, compare against **seasonal naïve baseline**.
+* Select the **best-performing model** based on metrics (MAE, MAPE, RMSE).
+* Save the trained best model as a `.pkl` file.
+* Load that model in Tab 5 for prediction.
+
+---
+
+### 🎯 Goal 3: Forecasting
+
+* User selects **filters** (NACEr2, Aufenthaltsland, Geopolitische\_Meldeeinheit, Saison).
+* Use the trained model to forecast **3, 6, and 12 months ahead** on the chosen slice.
+* Aggregate monthly predictions into **seasonal forecasts** where relevant.
+* Display results + uncertainty bands.
+
+---
+
 
  
 

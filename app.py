@@ -2,7 +2,7 @@ import streamlit as st
 from pathlib import Path
 import csv
 import io
-import os
+import os, time
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,8 +19,8 @@ from sklearn.compose import ColumnTransformer
 
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, IsolationForest
-from sklearn.model_selection import train_test_split, cross_val_score, KFold
-from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error
+from sklearn.model_selection import train_test_split, cross_val_score, KFold, TimeSeriesSplit
+from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 
 from joblib import dump
 from scipy import stats
@@ -129,6 +129,8 @@ def initialize_session_defaults():
         "max_features_choice": "sqrt",
         "learning_rate": 0.1,
         "apply_skew_correction_global": False,
+        "best_model_path": None,
+        "best_trained_pipe": None,
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -233,10 +235,43 @@ def detect_outliers_iforest(df, cols, contamination=0.05, n_estimators=200, rand
 
 @st.cache_data
 def yeo_johnson_transform(df: pd.DataFrame, cols: list):
+    """
+    Log1p skewness transform
+    Returns: (df_transformed)
+    """
     pt = PowerTransformer(method="yeo-johnson")
     out = df.copy()
     out[cols] = pt.fit_transform(out[cols])
     return out
+
+@st.cache_data
+def mixed_skew_transform(df: pd.DataFrame, numeric_cols: list):
+    """
+    Mixed skewness transform:
+    - log1p on strictly non-negative numeric columns
+    - Yeo–Johnson on remaining numeric columns (includes negatives/zeros)
+    Returns: (df_transformed, cols_log1p, cols_yeojohnson)
+    """
+    out = df.copy()
+    if not numeric_cols:
+        return out, [], []
+
+    num_df = df[numeric_cols]
+    # strictly non-negative (>= 0) gets log1p
+    mask_nonneg = (num_df.min(axis=0) >= 0)
+    cols_log1p = num_df.columns[mask_nonneg].tolist()
+    cols_yj = [c for c in numeric_cols if c not in cols_log1p]
+
+    # log1p
+    if cols_log1p:
+        out[cols_log1p] = np.log1p(out[cols_log1p])
+
+    # Yeo–Johnson
+    if cols_yj:
+        pt = PowerTransformer(method="yeo-johnson")
+        out[cols_yj] = pt.fit_transform(out[cols_yj])
+
+    return out, cols_log1p, cols_yj
 
 @st.cache_data
 def ts_grouped_by_country(df: pd.DataFrame):
@@ -510,8 +545,8 @@ if not st.session_state.df.empty:
 # --- Show the rest of the sidebar only if df is valid AND ML tab active ---
 if (
     not st.session_state.df_filtered.empty
-    and st.session_state.get("tab_ml") == True
-):  # BUG:
+    # and st.session_state.get("tab_ml") == True
+):  # BUG: Unable to control display/hide of this sidebar section
     st.sidebar.header("2) Zielvariable & Split")
     test_size = st.sidebar.slider(
         "Testgröße (%)", 
@@ -664,7 +699,7 @@ else:
         "🔎 Explorative Analyse",
         "🚨 Ausreißer-Erkennung",
         "🚀 ML Modell Trainieren",
-        "📊 Vorhersage & Visualisierungen"
+        "📈 Vorhersage & Visualisierungen"
     ]
     
     # --- TABS per layout diagram --- #
@@ -1178,7 +1213,7 @@ else:
             else:
                 tabs[0].write("Wähle Features aus, um Scatter-/Box-Plots zu sehen")
             # ---- END original EDA block ----
-# TODO: In progress
+
         # --------------------------------
         # Skewness-Analyse der numerischen Features (Plotly)
         # --------------------------------
@@ -1195,7 +1230,7 @@ else:
                     value=False,
                     help="Zeigt Histogramme mit transformierten (log1p) Werten an"
                 )
-
+            # BUG: Apply the raw df for displaying non-normalized chart
                 df_plot = df.copy()
                 if show_normalized:
                     try:
@@ -1242,7 +1277,7 @@ else:
                     # Render as markdown in the app
                     st.markdown(md_content2, unsafe_allow_html=False)
             
-
+# TODO: In progress
     with tab4:
         st.session_state.tab_ml = False
     # --------------------------------
@@ -1251,8 +1286,28 @@ else:
 
         with st.expander("🚨 Ausreißer-Erkennung", expanded=True):
             st.markdown("Erkennung auf Basis **selbst gewählter** numerischer Features")
-            default_cols = [c for c in num_cols if c != target_col]
-            
+            default_cols = [c for c in num_cols if c != target_col and c != "pandemic_dummy"]
+        
+            # DONE: --- NEW: choose to transform before detection ---
+            use_mixed_transform = st.checkbox(
+                "Skewness-Korrektur anwenden (log1p + Yeo–Johnson) – für Ausreißer-Erkennung & Training",
+                value=True,
+                help="Wendet log1p auf strikt nichtnegative numerische Spalten an und Yeo–Johnson auf den Rest. "
+                    "Ergebnis wird als df_transformed verwendet."
+            )
+
+            numeric_cols_all = df.select_dtypes(include=["number"]).columns.to_list()
+            if use_mixed_transform:
+                df_transformed, cols_log1p_used, cols_yj_used = mixed_skew_transform(df, numeric_cols_all)
+                st.caption(f"Transformation aktiv: log1p({len(cols_log1p_used)}) + Yeo–Johnson({len(cols_yj_used)})")
+            else:
+                df_transformed = df.copy()
+
+            # Make transformed frame available app-wide
+            st.session_state.df_transformed = df_transformed.copy()
+
+        
+        # REVIEW: What about this block?    
             # 1) Auswahl der Spalten für die Erkennung
             cols_for_outlier = st.multiselect(
                 "Spalten für die Ausreßer-Erkennung",
@@ -1266,13 +1321,18 @@ else:
             # st.session_state.cols_for_outlier = cols_for_outlier  # <-- persist
 
             # Always define defaults to prevent NameErrors
-            mask = pd.Series([False] * len(df))       # Default: no rows are outliers
+            mask = pd.Series([False] * len(df_transformed), index=df_transformed.index)
+            df_proc = df_transformed.copy()
+            df_for_plot = df_transformed.copy()
+
+            # mask = pd.Series([False] * len(df))       # Default: no rows are outliers
+            # df_proc = df.copy()
+            # df_for_plot = df.copy()
+        # REVIEW: What about these four parameters?    
             method = None                            # Default: no method selected
             apply_transform = False
             transformed_successfully = False
             show_normalized = False
-            df_proc = df.copy()
-            df_for_plot = df.copy()
             
             if not cols_for_outlier:
                 st.info("Bitte mindestens eine numerische Feature-Spalte auswählen")
@@ -1321,17 +1381,17 @@ else:
                 # ----------------------------
                 if method == "IQR":
                     factor = st.slider("IQR-Faktor", 1.0, 3.0, 1.5, 0.1, format="%.1f")
-                    mask = detect_outliers_iqr(df, cols_for_outlier, factor)
+                    mask = detect_outliers_iqr(df_transformed, cols_for_outlier, factor)
                     st.session_state.mask = mask  # <-- persist
-                    df_for_plot = df
+                    df_for_plot = df.copy()
 
                 elif method == "Z-Score":
                     threshold = st.slider("Z-Score-Schwelle", 2.0, 5.0, 3.0, 0.1, format="%.1f")
 
-                    # Transformation, falls gewünscht
+                    # Transformation, falls gewünscht (nur Visualisierung/Z-Score)
                     if apply_transform:
                         try:
-                            df_proc = yeo_johnson_transform(df_proc, cols_for_outlier)
+                            df_proc = yeo_johnson_transform(df_transformed, cols_for_outlier)
                             st.success("✅ Yeo-Johnson-Transformation **nur für Visualisierung** erfolgreich angewendet!")
                             transformed_successfully = True
                         except Exception as e:
@@ -1350,21 +1410,25 @@ else:
 
                     # Maskenberechnung — immer von den korrekten Daten
                     if apply_transform and transformed_successfully:
+                        # Z-Score auf transformierten Daten berechnen
                         mask = detect_outliers_z(df_proc, cols_for_outlier, threshold)
                         st.session_state.mask = mask  # <-- persist
-                        df_for_plot = df_proc.copy() if show_normalized else df
-                        # Zielspalte immer aus Rohdaten übernehmen
-                        df_for_plot[target_col] = df[target_col]
+                        # Visualisierung: transformiert, wenn gewünscht – sonst RAW
+                        df_for_plot = df_proc.copy() if show_normalized else df.copy()
+                        # Zielspalte immer aus Rohdaten übernehmen (y-Achse konsistent)
+                        df_for_plot[target_col] = df[target_col] # keep target on RAW scale for plotting
                     else:
-                        mask = detect_outliers_z(df, cols_for_outlier, threshold)
+                        # Z-Score auf **df_transformed** (pipeline-Basis), nicht RAW
+                        mask = detect_outliers_z(df_transformed, cols_for_outlier, threshold)
                         st.session_state.mask = mask  # <-- persist
-                        df_for_plot = df
+                         # Visualisierung: RAW
+                        df_for_plot = df.copy()
 
                 else:
                     cont = st.slider("IsolationForest: Contamination", 0.01, 0.20, 0.05, 0.01)
-                    mask = detect_outliers_iforest(df, cols_for_outlier, contamination=cont, random_state=st.session_state.random_state)
+                    mask = detect_outliers_iforest(df_transformed, cols_for_outlier, contamination=cont, random_state=st.session_state.random_state)
                     st.session_state.mask = mask  # <-- persist
-                    df_for_plot = df
+                    df_for_plot = df.copy()
 
             # ----------------------------
             # Zusammenfassung der Ausreißerinformation
@@ -1412,7 +1476,7 @@ else:
                         "Nur Ausreißer": "outliers",
                         "Keine Punkte": False
                     }
-
+                # REVIEW: Should df be used here or df_proc or df_transformed?
                 # ✅ Sync boxplot dataset with scatterplots
                 if method == "Z-Score" and show_normalized and apply_transform and transformed_successfully:
                     df_box = df_proc.copy()
@@ -1434,12 +1498,12 @@ else:
         # Ausreißer entfernen (optional)
         # ----------------------------
         if st.checkbox("Ausreißer aus den Daten entfernen (für das Training)"):
-            filtered_df = df.loc[~mask].copy()
+            filtered_df = df_transformed.loc[~mask].copy()
             st.session_state.df_filtered = filtered_df
             st.session_state.outliers_removed = True   # <- persist flag
             st.success(f"Neue Datenform: {filtered_df.shape[0]} Zeilen x {filtered_df.shape[1]} Spalten")
         else:
-            st.session_state.df_filtered = df.copy()
+            st.session_state.df_filtered = df_transformed.copy()
             st.session_state.outliers_removed = False   # <- persist flag
 
         st.write(f"Datenform für das Training: {st.session_state.df_filtered.shape[0]} Zeilen x {st.session_state.df_filtered.shape[1]} Spalten")
@@ -1454,20 +1518,23 @@ else:
     # --------------------------------
 
         st.number_input("Test", 1, 5, 1)
+        # Get transformed df as a basis for training + fallback
+        df_base = st.session_state.get("df_filtered", st.session_state.get("df_transformed", df))
+        df_train = df_base.copy()
+        
         # --------------------------------
         # Outlier Detection: Apply global skewness correction for modelling
         # --------------------------------
         if st.session_state.apply_skew_correction_global:
             try:
                 pt_global = PowerTransformer(method="yeo-johnson")
-                numeric_cols = df.select_dtypes(include=[np.number]).columns
-                df[numeric_cols] = pt_global.fit_transform(df[numeric_cols])
+                numeric_cols = df_train.select_dtypes(include=[np.number]).columns
+                df_train[numeric_cols] = pt_global.fit_transform(df_train[numeric_cols])
                 st.success("✅ Globale Yeo-Johnson-Skewness-Korrektur erfolgreich angewendet!")
             except Exception as e:
                 st.error(f"Fehler bei der globalen Transformation: {e}")
 
-        # Erstellen von Feature-Matrix und Label-Vektor:
-        df_train = st.session_state.get("df_filtered", df) # pass a saved filtered dataframe from Ausreißer section
+        # Erstellen von Feature-Matrix und Label-Vektor:   
         if st.session_state.get("outliers_removed", False):
             st.markdown(f"**Ausreißer-entfernte Datenform:** {df_train.shape[0]} Zeilen x {df_train.shape[1]} Spalten")
         else:
@@ -1478,9 +1545,17 @@ else:
         method = st.session_state.get("outlier_method", None)
         mask = st.session_state.get("mask", pd.Series(False, index=df.index))
 
-        # Data split
+        # Data split - This is the main source of Features/Target for ML training !
         X = df_train.drop(columns=[target_col], axis=1)
         y = df_train[target_col]
+        
+        # Guard: drop datetime columns (e.g., JahrMonat) from X before modeling
+        dt_cols = X.select_dtypes(
+            include=["datetime64[ns]", "datetimetz"]
+        ).columns.tolist()
+        if dt_cols:
+            X = X.drop(columns=dt_cols)
+            st.caption(f"⏱️ Datetime-Spalten für Training entfernt: {', '.join(dt_cols)}")
 
 
         # Spaltentypen bestimmen:
@@ -1508,30 +1583,133 @@ else:
                 ("num", numeric_transformer, num_cols_all),
                 ("cat", categorical_transformer, cat_cols_all)
             ],
-            remainder="passthrough"     # optional "drop"
+            remainder="drop"     # optional "passthrough"
         )
+        
+        # DONE: NEW: Auto-pick best model vs seasonal naive
+        with st.expander("🔎 Modellvalidierung & Auto-Pick vs. Seasonal Naïve"):
+            run_pick = st.button("▶️ Auto-Pick jetzt ausführen", key="btn_autopick")
+            if run_pick:
+                # Candidate models (extendable)
+                candidates = {
+                    "Ridge": Ridge(alpha=1.0, random_state=st.session_state.random_state),
+                    "Lasso": Lasso(alpha=0.001, random_state=st.session_state.random_state),
+                    "ElasticNet": ElasticNet(alpha=0.001, l1_ratio=0.5, random_state=st.session_state.random_state),
+                    "RandomForest": RandomForestRegressor(n_estimators=300, random_state=st.session_state.random_state),
+                    "GradientBoosting": GradientBoostingRegressor(n_estimators=300, random_state=st.session_state.random_state),
+                }
 
-        # Modell erstellen
-        model = build_model(st.session_state.model_name)
+                # Seasonal naive baseline
+                use_seasonal_naive = "Lag_12" in X.columns
 
-        # Pipeline zusammenbauen
-        pipe = Pipeline(
-            steps=[
-                ("prep", preprocessor),
-                ("model", model)
-            ]
-        )
+                tscv = TimeSeriesSplit(n_splits=5)
+                results = []
 
-        # --------------------------
-        # Modelltrainieren
-        # --------------------------
+                for name, model in candidates.items():
+                    pipe = Pipeline(steps=[("prep", preprocessor), ("model", model)])
+                    maes, rmses, mapes, maes_naive = [], [], [], []
 
-        # Check if we already have stored results in the session
-        if "model_trained" not in st.session_state:
-            st.session_state.model_trained = False
+                    for train_idx, test_idx in tscv.split(X):
+                        X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+                        y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
+
+                        pipe.fit(X_tr, y_tr)
+                        y_hat = pipe.predict(X_te)
+
+                        # Baseline
+                        if use_seasonal_naive:
+                            y_naive = X_te["Lag_12"].values
+                        else:
+                            y_naive = np.roll(y_te.values, 1)
+                            y_naive[0] = y_tr.values[-1]
+
+                        maes.append(mean_absolute_error(y_te, y_hat))
+                        rmses.append(root_mean_squared_error(y_te, y_hat))
+                        mapes.append(mean_absolute_percentage_error(y_te, y_hat))
+                        maes_naive.append(mean_absolute_error(y_te, y_naive))
+
+                    results.append({
+                        "model": name,
+                        "MAE_mean": float(np.mean(maes)),
+                        "RMSE_mean": float(np.mean(rmses)),
+                        "MAPE_mean": float(np.mean(mapes)),
+                        "MAE_naive_mean": float(np.mean(maes_naive))
+                    })
+
+                res_df = pd.DataFrame(results).sort_values("MAE_mean")
+                st.dataframe(res_df, width='stretch')
+
+                best_name = res_df.iloc[0]["model"]
+                st.success(f"Beste Auswahl nach MAE: **{best_name}**")
+                st.session_state.best_model_name = best_name
+                st.session_state.autopick_results = res_df
+                
+            # Always show last results if available (no heavy compute)
+            if "autopick_results" in st.session_state:
+                st.dataframe(st.session_state.autopick_results, width='stretch')
+                st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
+
+            # FIXED: Should here be used st.session_state.best_model_name?
+            # Modell erstellen
+            # model = build_model(st.session_state.model_name)
+            use_best = st.checkbox("⚡ Bestes Modell aus Auto-Pick verwenden (überschreibt Sidebar)", value=False, key="use_auto_pick")
+            chosen_model_name = st.session_state.model_name
+            if use_best:
+                chosen_model_name = st.session_state.get("best_model_name", chosen_model_name)
+
+            # Modell erstellen
+            model = build_model(chosen_model_name)
+
+
+            # Pipeline zusammenbauen
+            pipe = Pipeline(
+                steps=[
+                    ("prep", preprocessor),
+                    ("model", model)
+                ]
+            )
+            
+            # --------------------------
+            # Modelltrainieren
+            # --------------------------
+
+            # Check if we already have stored results in the session
+            if "model_trained" not in st.session_state:
+                st.session_state.model_trained = False
+            
+            # DONE: Run the best model and save as Pickle for re-use
+            # Beste Modell führen und speichern
+            save_pick = st.button("💾 Bestes Modell speichern & für Forecast laden", key="btn_save_pick", 
+                                  disabled=("best_model_name" not in st.session_state))
+            if save_pick:
+                best_name = st.session_state.get("best_model_name", None)
+                if not best_name:
+                    st.error("Bitte zuerst Auto-Pick ausführen (▶️ Auto-Pick jetzt ausführen).")
+                else:
+                    # Refit the best on FULL data using your existing preprocessor
+                    best_model = build_model(best_name)   # ← no dependency on local 'candidates'
+                    best_pipe = Pipeline(steps=[("prep", preprocessor), ("model", best_model)])
+                    # Modelltraining
+                    with st.spinner("Trainiere Best-Modell..."):
+                        best_pipe.fit(X, y)
+
+                    # Persist to disk
+                    models_dir = "models"
+                    os.makedirs(models_dir, exist_ok=True)
+                    ts = time.strftime("%Y%m%d_%H%M%S")
+                    base_name = st.session_state.get("uploaded_filename", "dataset")
+                    model_path = os.path.join(models_dir, f"{base_name}_{best_name}_{ts}.pkl")
+                    dump(best_pipe, model_path)
+                    st.success(f"Gespeichert: {model_path}")
+                    
+                    # Keep it in memory so KPI/Forecast can use it immediately
+                    st.session_state.best_model_path = model_path
+                    st.session_state.best_model_name = best_name
+                    st.session_state.best_trained_pipe = best_pipe
 
         # Beginnt erst nach dem Drücken der Taste
-        if st.button("🚀 Modell trainieren"):
+        run_model = st.button("🚀 Ausgewählte Modell trainieren", key="btn_own_pick")
+        if run_model:
             
             # Train/Test-Split einbauen
             X_train, X_test, y_train, y_test = train_test_split(
@@ -1614,15 +1792,48 @@ else:
         if "train_r2" in st.session_state:    
             st.subheader("📊 Performance")
             
+           # Use actual session keys in priority order
+            pipe_for_kpi = (
+                st.session_state.get("pipe")
+                or st.session_state.get("trained_pipe")
+                or st.session_state.get("best_trained_pipe")
+            )
+            if pipe_for_kpi:
+                # use stored y_pred / metrics if present; otherwise compute lightweight metrics on cached test split
+                # (Anzeige der gespeicherten Kennzahlen – nur wenn vorhanden)
+                train_r2   = st.session_state.get("train_r2", None)
+                test_r2    = st.session_state.get("test_r2", None)
+                train_mae  = st.session_state.get("train_mae", None)
+                test_mae   = st.session_state.get("test_mae", None)
+                train_rmse = st.session_state.get("train_rmse", None)
+                test_rmse  = st.session_state.get("test_rmse", None)
+                train_mape = st.session_state.get("train_mape", None)
+                test_mape  = st.session_state.get("test_mape", None)
+
+                cols1 = st.columns(4)
+                if train_r2 is not None:  cols1[0].metric("Train R²", f"{train_r2:.3f}")
+                if test_r2 is not None:   cols1[1].metric("Test R²",  f"{test_r2:.3f}")
+                if train_mae is not None: cols1[2].metric("Train MAE", f"{train_mae:.2f}")
+                if test_mae is not None:  cols1[3].metric("Test MAE",  f"{test_mae:.2f}")
+
+                cols2 = st.columns(4)
+                if train_rmse is not None: cols2[0].metric("Train RMSE", f"{train_rmse:.2f}")
+                if test_rmse is not None:  cols2[1].metric("Test RMSE",  f"{test_rmse:.2f}")
+                if train_mape is not None: cols2[2].metric("Train MAPE", f"{train_mape:.2%}" if train_mape < 1 else f"{train_mape:.2f}")
+                if test_mape is not None:  cols2[3].metric("Test MAPE",  f"{test_mape:.2%}" if test_mape  < 1 else f"{test_mape:.2f}")
+            else:
+                # No-op: we are already inside 'if "train_r2" in st.session_state'
+                pass
+            
             # --- Detect outdated model results ---
             # Create a dict of the CURRENT UI + data settings
             current_state = {
                 "df_shape": df.shape,
-                "model_name": model_name,
-                "test_size": test_size,
-                "random_state": random_state,
-                "apply_skew_correction_global": apply_skew_correction_global,
-                "cols_for_outlier": sorted(cols_for_outlier) if cols_for_outlier else [],
+                "model_name": st.session_state.get("model_name"),
+                "test_size": st.session_state.get("test_size"),
+                "random_state": st.session_state.get("random_state"),
+                "apply_skew_correction_global": st.session_state.get("apply_skew_correction_global"),
+                "cols_for_outlier": sorted(st.session_state.get("cols_for_outlier", [])),
                 "uploaded_filename": st.session_state.get("uploaded_filename", None),
 
                 # RandomForest-specific
@@ -1910,7 +2121,8 @@ else:
 
         with st.expander("💾 Trainiertes Modell speichern", expanded=True):
             if st.session_state.get("model_trained", False):
-                if st.button("Als .joblib exportieren"):
+                save_model = st.button("Als .joblib exportieren", key="btn_save_model")
+                if save_model:
                     buf = io.BytesIO()
                     dump(pipe, buf)
                     buf.seek(0)
@@ -1929,16 +2141,271 @@ else:
             else:
                 st.warning("⚠️ Kein trainiertes Modell vorhanden.")
 
+    # --------------------------------
+    # Tab 6: Vorhersage
+    # --------------------------------
     with tab6:
-        # st.session_state.tab_ml = False
-    # --------------------------
-    # 📊 Vorhersage
-    # --------------------------
-        st.subheader("Vorhersage & Visualisierungen")
-        st.info("To be developed")
+        st.header("📈 Vorhersage")
+
+        # 1) Resolve a trained pipeline to use (prefer in-memory; else saved path)
+        pipe_best = (
+            st.session_state.get("best_trained_pipe")   # after Auto-Pick + Save
+            or st.session_state.get("pipe")             # after "🚀 Ausgewählte Modell trainieren"
+        )
+
+        if not pipe_best:
+            model_path = st.session_state.get("best_model_path", None)
+            if model_path:
+                try:
+                    from joblib import load
+                    pipe_best = load(model_path)
+                except Exception as e:
+                    st.error(f"Fehler beim Laden des gespeicherten Modells: {e}")
+                    pipe_best = None
+
+        if not pipe_best:
+            st.info("⚠️ Bitte trainiere ein Modell in Tab 5 (ML Modell Trainieren) oder speichere ein Auto-Pick-Modell.")
+        else:
+            # 2) Slice selectors (only show selectors for columns that exist)
+            #    We use RAW df for slicing and history.
+            if "Geopolitische_Meldeeinheit" in df.columns:
+                sel_country = st.selectbox(
+                    "Geopolitische_Meldeeinheit",
+                    sorted(df["Geopolitische_Meldeeinheit"].dropna().astype(str).unique())
+                )
+            else:
+                sel_country = None
+
+            if "NACEr2" in df.columns:
+                sel_nace = st.selectbox(
+                    "NACEr2",
+                    sorted(df["NACEr2"].dropna().astype(str).unique())
+                )
+            else:
+                sel_nace = None
+
+            if "Aufenthaltsland" in df.columns:
+                sel_auf = st.selectbox(
+                    "Aufenthaltsland",
+                    ["(Alle)"] + sorted(df["Aufenthaltsland"].dropna().astype(str).unique())
+                )
+            else:
+                sel_auf = "(Alle)"
+
+            horizon = st.select_slider("Horizont (Monate)", options=[3, 6, 12], value=3)
+
+            # 3) Build slice (apply only filters that exist)
+            q = pd.Series([True] * len(df), index=df.index)
+            if sel_country is not None:
+                q &= (df["Geopolitische_Meldeeinheit"].astype(str) == str(sel_country))
+            if sel_nace is not None:
+                q &= (df["NACEr2"].astype(str) == str(sel_nace))
+            if ("Aufenthaltsland" in df.columns) and (sel_auf != "(Alle)"):
+                q &= (df["Aufenthaltsland"].astype(str) == str(sel_auf))
+
+            df_slice = (
+                df.loc[q].sort_values(["Jahr", "Monat"]).reset_index(drop=True)
+                if ("Jahr" in df.columns and "Monat" in df.columns) else pd.DataFrame()
+            )
+
+            if df_slice.empty or "value" not in df_slice.columns:
+                st.warning("Keine Daten für die gewählte Auswahl oder Zielspalte 'value' fehlt.")
+            else:
+                # 4) Gather expected input columns from the pipeline's preprocessor ("prep")
+                expected_inputs = None
+                try:
+                    prep = pipe_best.named_steps.get("prep", None)
+                    if prep and hasattr(prep, "transformers_"):
+                        expected_inputs = []
+                        for _, _, cols in prep.transformers_:
+                            if cols is None:
+                                continue
+                            if isinstance(cols, (list, tuple, pd.Index)):
+                                expected_inputs.extend(list(cols))
+                            elif isinstance(cols, str):
+                                expected_inputs.append(cols)
+                    # Fallback: some sklearn versions expose feature_names_in_ on the pipeline
+                    if not expected_inputs:
+                        expected_inputs = list(getattr(pipe_best, "feature_names_in_", []))
+                except Exception:
+                    expected_inputs = None
+
+                # Helper: month cyclic encoding
+                import math
+                def month_cyc(m: int):
+                    return math.sin(2 * math.pi * m / 12), math.cos(2 * math.pi * m / 12)
+
+                # 5) Run forecast only on button click
+                run_fc = st.button("▶️ Vorhersage jetzt ausführen", key="btn_run_forecast")
+
+                if run_fc:
+                    history = df_slice.copy()
+                    # Derive helpful columns if missing (Quartal, Saison, Land_Monat)
+                    if "Quartal" in (expected_inputs or []) and "Quartal" not in history.columns and "Monat" in history.columns:
+                        history["Quartal"] = ((history["Monat"].astype(int) - 1) // 3 + 1).astype(int)
+
+                    if "Saison" in (expected_inputs or []) and "Saison" not in history.columns and "Monat" in history.columns:
+                        season_map = {
+                            12: "Winter", 1: "Winter", 2: "Winter",
+                            3: "Frühling", 4: "Frühling", 5: "Frühling",
+                            6: "Sommer", 7: "Sommer", 8: "Sommer",
+                            9: "Herbst", 10: "Herbst", 11: "Herbst",
+                        }
+                        history["Saison"] = history["Monat"].map(season_map)
+
+                    if "Land_Monat" in (expected_inputs or []) and "Land_Monat" not in history.columns:
+                        if "Geopolitische_Meldeeinheit" in history.columns and "Monat" in history.columns:
+                            history["Land_Monat"] = history["Geopolitische_Meldeeinheit"].astype(str) + "_" + history["Monat"].astype(str)
+
+                    # Forecast loop
+                    future_rows = []
+                    for step in range(horizon):
+                        last_year = int(history["Jahr"].iloc[-1])
+                        last_month = int(history["Monat"].iloc[-1])
+                        next_year = last_year + 1 if last_month == 12 else last_year
+                        next_month = 1 if last_month == 12 else last_month + 1
+
+                        sin_m, cos_m = month_cyc(next_month)
+
+                        # Rolling features from 'history'
+                        def tail_mean(k: int):
+                            return float(history["value"].tail(k).mean()) if len(history) >= k else float(history["value"].mean())
+
+                        feat_row = {
+                            # numeric lags/MAs (create only if they existed in training)
+                            "Lag_1":  float(history["value"].iloc[-1]) if len(history) >= 1 else float(history["value"].mean()),
+                            "Lag_3":  float(history["value"].iloc[-3]) if len(history) >= 3 else float(history["value"].iloc[-1]),
+                            "Lag_12": float(history["value"].iloc[-12]) if len(history) >= 12 else float(history["value"].iloc[-1]),
+                            "MA3":    tail_mean(3),
+                            "MA6":    tail_mean(6),
+                            "MA12":   tail_mean(12),
+                            "Month_cycl_sin": sin_m,
+                            "Month_cycl_cos": cos_m,
+                            "Jahr": next_year,
+                            "Monat": next_month,
+                        }
+
+                        # Carry identifiers for categorical encoders when present
+                        if sel_country is not None:
+                            feat_row["Geopolitische_Meldeeinheit"] = sel_country
+                        if sel_nace is not None:
+                            feat_row["NACEr2"] = sel_nace
+                        if ("Aufenthaltsland" in df.columns) and (sel_auf != "(Alle)"):
+                            feat_row["Aufenthaltsland"] = sel_auf
+                        # Derivables if expected
+                        if "Quartal" in (expected_inputs or []):
+                            feat_row["Quartal"] = ((next_month - 1) // 3 + 1)
+                        if "Saison" in (expected_inputs or []):
+                            season_map = {
+                                12: "Winter", 1: "Winter", 2: "Winter",
+                                3: "Frühling", 4: "Frühling", 5: "Frühling",
+                                6: "Sommer", 7: "Sommer", 8: "Sommer",
+                                9: "Herbst", 10: "Herbst", 11: "Herbst",
+                            }
+                            feat_row["Saison"] = season_map[next_month]
+                        if "Land_Monat" in (expected_inputs or []):
+                            if sel_country is not None:
+                                feat_row["Land_Monat"] = f"{sel_country}_{next_month}"
+
+                        # Handle pandemic flag if expected
+                        if "pandemic_dummy" in (expected_inputs or []):
+                            # assume 0 for future unless you have a calendar
+                            feat_row["pandemic_dummy"] = 0
+
+                        # Build X_next; align to expected inputs if we know them
+                        X_next = pd.DataFrame([feat_row])
+                        if expected_inputs:
+                            # Ensure all expected columns exist; fill missing numeric with 0, categorical with current selection or "NA"
+                            for col in expected_inputs:
+                                if col not in X_next.columns:
+                                    if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+                                        X_next[col] = 0.0
+                                    else:
+                                        X_next[col] = "NA"
+                            X_next = X_next[expected_inputs]
+
+                        # Predict next month
+                        try:
+                            yhat = float(pipe_best.predict(X_next)[0])
+                        except Exception as e:
+                            st.error(f"Vorhersagefehler (Feature-Ausrichtung): {e}")
+                            break
+
+                        future_rows.append({
+                            "Jahr": next_year,
+                            "Monat": next_month,
+                            "value": yhat,
+                            "Geopolitische_Meldeeinheit": sel_country if sel_country is not None else None,
+                            "NACEr2": sel_nace if sel_nace is not None else None,
+                            "Aufenthaltsland": sel_auf if (sel_auf != "(Alle)") else None
+                        })
+
+                        # Append the forecasted value to history to roll lags/MAs forward
+                        new_hist_row = {
+                            "Jahr": next_year, "Monat": next_month, "value": yhat
+                        }
+                        if "Geopolitische_Meldeeinheit" in df.columns and sel_country is not None:
+                            new_hist_row["Geopolitische_Meldeeinheit"] = sel_country
+                        if "NACEr2" in df.columns and sel_nace is not None:
+                            new_hist_row["NACEr2"] = sel_nace
+                        if "Aufenthaltsland" in df.columns and sel_auf != "(Alle)":
+                            new_hist_row["Aufenthaltsland"] = sel_auf
+                        if "Quartal" in history.columns:
+                            new_hist_row["Quartal"] = ((next_month - 1) // 3 + 1)
+                        if "Saison" in history.columns:
+                            new_hist_row["Saison"] = season_map[next_month] if "season_map" in locals() else None
+                        if "Land_Monat" in history.columns and sel_country is not None:
+                            new_hist_row["Land_Monat"] = f"{sel_country}_{next_month}"
+                        if "pandemic_dummy" in history.columns:
+                            new_hist_row["pandemic_dummy"] = 0
+
+                        history = pd.concat([history, pd.DataFrame([new_hist_row])], ignore_index=True)
+
+                    # Persist results so rerenders are instant
+                    future_df = pd.DataFrame(future_rows)
+                    if not future_df.empty:
+                        season_map = {
+                            12: "Winter", 1: "Winter", 2: "Winter",
+                            3: "Frühling", 4: "Frühling", 5: "Frühling",
+                            6: "Sommer", 7: "Sommer", 8: "Sommer",
+                            9: "Herbst", 10: "Herbst", 11: "Herbst",
+                        }
+                        future_df["Saison"] = future_df["Monat"].map(season_map)
+                        season_forecast = future_df.groupby("Saison", as_index=False)["value"].sum()
+
+                        st.session_state.future_df = future_df
+                        st.session_state.season_forecast = season_forecast
+                        st.session_state.slice_meta = {
+                            "country": sel_country, "nace": sel_nace, "auf": sel_auf, "horizon": horizon
+                        }
+
+                # 6) Always show last computed results (lightweight)
+                if "future_df" in st.session_state and not st.session_state.future_df.empty:
+                    st.subheader("📊 Prognosewerte")
+                    st.dataframe(st.session_state.future_df, width='stretch')
+
+                    st.subheader("📅 Saisonal aggregierte Vorhersage")
+                    st.dataframe(st.session_state.season_forecast, width='stretch')
+
+                    # Plot: history + forecast
+                    try:
+                        import plotly.express as px
+                        hist_plot = df_slice[["Jahr", "Monat", "value"]].copy()
+                        hist_plot["Typ"] = "Historie"
+                        fut_plot = st.session_state.future_df[["Jahr", "Monat", "value"]].copy()
+                        fut_plot["Typ"] = "Forecast"
+                        plot_df = pd.concat([hist_plot, fut_plot], ignore_index=True)
+                        fig = px.line(
+                            plot_df, x="Monat", y="value", color="Jahr",
+                            line_dash="Typ", title="Historie & Vorhersage"
+                        )
+                        st.plotly_chart(fig, width='stretch')
+                    except Exception as e:
+                        st.warning(f"Plot konnte nicht erstellt werden: {e}")
+
         
 
 
 # Footer
-# st.caption("Made with ❤️")
+st.caption("Made with ❤️ & ☕")
 st.caption("🚧 Under Construction / Noch im Bau", width="stretch")
