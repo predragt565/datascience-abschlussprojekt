@@ -88,10 +88,10 @@ def validate_required_columns_csv(df):
         "Lag_1",
         "Lag_3",
         "Lag_12",
-        "Aufenthaltsland_Saison",
-        "NACEr2_Saison",
-        "Land_Monat",
-        "Land_Saison",
+        # "Aufenthaltsland_Saison",
+        # "NACEr2_Saison",
+        # "Land_Monat",
+        # "Land_Saison",
         "pandemic_dummy"
     }
     missing = required_columns - set(df.columns)
@@ -344,16 +344,16 @@ def load_prepare_data(json_obj=None, url=None):
         df_anzahl[f"Lag_{L}"] = grp["value"].shift(L).fillna(0).astype(int)
 
     # 8. Residency × Saison (Inländer vs. Ausländer):
-    df_anzahl["Aufenthaltsland_Saison"] = df_anzahl["Aufenthaltsland_Idx"] + "_" + df_anzahl["Saison"].astype(str)
+    # df_anzahl["Aufenthaltsland_Saison"] = df_anzahl["Aufenthaltsland_Idx"] + "_" + df_anzahl["Saison"].astype(str)
 
     # 9. Unterkunft × Saison:
-    df_anzahl["NACEr2_Saison"] = df_anzahl["NACEr2_Idx"] + "_" + df_anzahl["Saison"].astype(str)
+    # df_anzahl["NACEr2_Saison"] = df_anzahl["NACEr2_Idx"] + "_" + df_anzahl["Saison"].astype(str)
 
     # 10. Land × Monat:
-    df_anzahl["Land_Monat"] = df_anzahl["Geopolitische_Meldeeinheit_Idx"] + "_" + df_anzahl["Monat"].astype(str)
+    # df_anzahl["Land_Monat"] = df_anzahl["Geopolitische_Meldeeinheit_Idx"] + "_" + df_anzahl["Monat"].astype(str)
 
     # 10. Land × Saison:
-    df_anzahl["Land_Saison"] = df_anzahl["Geopolitische_Meldeeinheit_Idx"] + "_" + df_anzahl["Saison"].astype(str)
+    # df_anzahl["Land_Saison"] = df_anzahl["Geopolitische_Meldeeinheit_Idx"] + "_" + df_anzahl["Saison"].astype(str)
 
     # 11. Pandemic (Covid19) Maske
     # Define pandemic period (adjust dates as needed)

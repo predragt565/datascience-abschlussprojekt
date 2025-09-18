@@ -19,12 +19,10 @@
     "Lag_12",
     "pch_sm",
     "pch_sm_19",
-    "NACEr2_Saison",
-    "Land_Saison",
-    "Aufenthaltsland_Saison",
     "Month_cycl_sin",
     "Month_cycl_cos",
     "Jahr",
+    "Monat",
     "pandemic_dummy"
   ],
 

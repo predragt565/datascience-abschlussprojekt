@@ -87,6 +87,22 @@ st.set_page_config(
 #     </style>
 # """, unsafe_allow_html=True)
 
+# IMPORTANT: This fix does not work in Firefox, hopfeully it works better in Chrome and Edge
+# Fix: a workaround to display part of the sidebar section related to ML Tab
+# onla when that tab is active/selected. The Streamlit does not support native 'active tab' control
+st.markdown("""
+<style>
+/* Hide ML-only block by default */
+[data-testid="stSidebar"] .ml-only { display: none; }
+
+/* Show only if the 5th tab <button> is selected */
+[role="tablist"] > [role="tab"]:nth-of-type(5)[aria-selected="true"]
+  ~ [data-testid="stSidebar"] .ml-only {
+  display: block;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ------------------------------ #
 # --- Initial Configuration ---
 # ------------------------------ #
@@ -543,10 +559,9 @@ if not st.session_state.df.empty:
 
 
 # --- Show the rest of the sidebar only if df is valid AND ML tab active ---
-if (
-    not st.session_state.df_filtered.empty
-    # and st.session_state.get("tab_ml") == True
-):  # BUG: Unable to control display/hide of this sidebar section
+if not st.session_state.df.empty:
+    st.sidebar.markdown('<div class="ml-only">', unsafe_allow_html=True)    # <- secret div wrapper
+    
     st.sidebar.header("2) Zielvariable & Split")
     test_size = st.sidebar.slider(
         "Testgröße (%)", 
@@ -678,6 +693,7 @@ if (
         help="Wendet Yeo-Johnson-Transformation auf numerische Features an, bevor das Modell trainiert wird.  \n"
             "Empfohlen bei starker Schiefe (|Skewness| > 1)."
     )
+    st.sidebar.markdown('</div>', unsafe_allow_html=True)   # <- End of hidden div wrapper
 
 
 
@@ -694,8 +710,8 @@ else:
     df = st.session_state.df
 
     TAB_LABELS = [
-        "📊 Korrelation-Matrix",
         "🏨 Übernachtungen nach Jahr",
+        "📊 Korrelation-Matrix",
         "🔎 Explorative Analyse",
         "🚨 Ausreißer-Erkennung",
         "🚀 ML Modell Trainieren",
@@ -706,115 +722,14 @@ else:
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(TAB_LABELS)
                                                  
                                                  
-    with tab1:
-    # --------------------------------
-    # Responsive Correlation heatmap with slider filters
-    # --------------------------------
-        st.session_state.tab_ml = False
-        # Übersicht der Heatmap
-        with st.expander("Korrelations-Heatmap", expanded=True):
-            group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
-            group_slider2 = ["NACEr2", "Aufenthaltsland"]
-            group_slider3 = []
-            group_slider4 = ["Frühling", "Sommer", "Herbst", "Winter"]
-
-            # numeric features only
-            num_cols = [
-                "value", "Monat", "Jahr", "pch_sm",
-                "Month_cycl_sin", "Month_cycl_cos",
-                "MA3", "MA6", "MA12",
-                "Lag_1", "Lag_3", "Lag_12"
-            ]
-            
-            c1, c2, c3 ,c4 = st.columns(4)
-            
-            with c1:
-                choice1 = st.select_slider(f"Wähle ein Land aus {len(group_slider1)}", options=group_slider1, key="country_slider")
-                # Build index column name dynamically
-                choice1_idx_col = "Geopolitische_Meldeeinheit_Idx"
-                # Get the corresponding index value
-                choice1_idx_val = df[df["Geopolitische_Meldeeinheit"] == choice1][choice1_idx_col].iloc[0] if not df[df["Geopolitische_Meldeeinheit"] == choice1].empty else None
-
-            with c2:
-                choice2 = st.select_slider(f"Wähle eine Featuregruppe aus {len(group_slider2)}", options=group_slider2, key="feature_group_slider")
-                # st.write(f"You selected: {choice2}")
-            
-            with c3:
-                group_slider3 = sorted(df[choice2].dropna().unique())
-                choice3 = st.select_slider(f"Wähle eine Feature aus {len(group_slider3)}", options=group_slider3, key="feature_slider")
-                
-                # Build index column name dynamically
-                choice3_idx_col = f"{choice2}_Idx"
-
-                # Get the corresponding index value (assuming 1-to-1 mapping)
-                choice3_idx_val = df[df[choice2] == choice3][choice3_idx_col].iloc[0] if not df[df[choice2] == choice3].empty else None
-                # st.write(f"You selected: {choice3} | {choice3_idx_val}")
-
-            with c4:
-                choice4 = st.select_slider(f"Wähle eine Saison aus {len(group_slider4)}", options=group_slider4, key="season_slider")
-                # st.write(f"You selected: {choice3}")
-            
-            # Plot a heatmap based on selected choice
-            slider2_map = {
-                "Geopolitische_Meldeeinheit": "Land_Saison", 
-                "NACEr2": "NACEr2_Saison", 
-                "Aufenthaltsland": "Aufenthaltsland_Saison"
-            }
-            composite_column1 = slider2_map.get("Geopolitische_Meldeeinheit", "Unknown_Group")
-            composite_column2 = slider2_map.get(choice2, "Unknown_Group")
-            composite_value1 = f"{choice1_idx_val}_{choice4}"
-            composite_value2 = f"{choice3_idx_val}_{choice4}"
-
-            # --- Filter the DataFrame ---
-            df_filtered = df[
-                (df[composite_column1] == composite_value1) &
-                (df[composite_column2] == composite_value2)
-            ]
-                
-            # --- Show heatmap if data exists ---
-            if not df_filtered.empty:
-                corr = df_filtered[num_cols].corr().round(5)
-                fig11 = px.imshow(
-                    corr,
-                    text_auto=True,
-                    aspect="auto",
-                    title=f"Korrelations-Heatmap: {composite_column2} = {composite_value2} & {composite_column1} = {composite_value1}",
-                    color_continuous_scale="RdBu",
-                    zmin=-1,
-                    zmax=1
-                )
-                fig11.update_traces(textfont=dict(size=10))
-                fig11.update_layout(    
-                    xaxis=dict(tickfont=dict(size=12)),
-                    yaxis=dict(tickfont=dict(size=12))
-                )
-                st.plotly_chart(fig11, width='stretch')
-                
-                if st.button("💾 Aktuell angezeigte Korrelation als CSV speichern"):
-                    corr.to_csv(f"data/correlation_heatmap/correlation_{choice1}_{choice2}_{choice3}_{choice4}.csv")
-
-                
-                with st.expander("Tabellarisch übersicht"):
-                    st.dataframe(df_filtered)
-                
-            else:
-               st.warning(f"Keine Daten zur Auswahl: `{composite_column1}` = `{composite_value1}` and `{composite_column2}` = `{composite_value2}`")
-        
-        if st.session_state.df_from_json == True:       
-            with st.expander("🔎 Analytische Befunde", expanded=False):
-                # Load a local markdown file
-                md_content = Path("markdown/analytical_findings_correlation_de.md").read_text(encoding="utf-8")
-                # Render as markdown in the app
-                st.markdown(md_content, unsafe_allow_html=False)
             
             
 # DONE: Line chart feature
-    with tab2:
+    with tab1:
     # --------------------------------
     # Übernachtungen nach Jahr Chart
     # --------------------------------    
-        st.session_state.tab_ml = False
-        # import plotly.express as px
+        # st.session_state.tab_ml = False
         
         with st.expander("📈 Zeitreihe: Gesamtübernachtungen pro Land", expanded=True):
 
@@ -1050,7 +965,7 @@ else:
 
             st.plotly_chart(fig22, width='stretch')
 
-        with st.expander("Cycle Chart", expanded=False):        
+        # with st.expander("Cycle Chart", expanded=False):        
             
             # Version 3
                 
@@ -1107,15 +1022,117 @@ else:
             # )
 
             # st.plotly_chart(fig13, width='stretch')
-            pass
+            # pass
         
+    with tab2:
+    # --------------------------------
+    # Responsive Correlation heatmap with slider filters
+    # --------------------------------
+        # st.session_state.tab_ml = False
+        
+        # Übersicht der Heatmap
+        with st.expander("Korrelations-Heatmap", expanded=True):
+            group_slider1 = df["Geopolitische_Meldeeinheit"].unique()
+            group_slider2 = ["NACEr2", "Aufenthaltsland"]
+            group_slider3 = []
+            group_slider4 = ["Frühling", "Sommer", "Herbst", "Winter"]
+
+            # numeric features only
+            num_cols = [
+                "value", "Monat", "Jahr", "pch_sm",
+                "Month_cycl_sin", "Month_cycl_cos",
+                "MA3", "MA6", "MA12",
+                "Lag_1", "Lag_3", "Lag_12"
+            ]
+            
+            c1, c2, c3 ,c4 = st.columns(4)
+            
+            with c1:
+                choice1 = st.select_slider(f"Wähle ein Land aus {len(group_slider1)}", options=group_slider1, key="country_slider")
+                # Build index column name dynamically
+                choice1_idx_col = "Geopolitische_Meldeeinheit_Idx"
+                # Get the corresponding index value
+                choice1_idx_val = df[df["Geopolitische_Meldeeinheit"] == choice1][choice1_idx_col].iloc[0] if not df[df["Geopolitische_Meldeeinheit"] == choice1].empty else None
+
+            with c2:
+                choice2 = st.select_slider(f"Wähle eine Featuregruppe aus {len(group_slider2)}", options=group_slider2, key="feature_group_slider")
+                # st.write(f"You selected: {choice2}")
+            
+            with c3:
+                group_slider3 = sorted(df[choice2].dropna().unique())
+                choice3 = st.select_slider(f"Wähle eine Feature aus {len(group_slider3)}", options=group_slider3, key="feature_slider")
+                
+                # Build index column name dynamically
+                choice3_idx_col = f"{choice2}_Idx"
+
+                # Get the corresponding index value (assuming 1-to-1 mapping)
+                choice3_idx_val = df[df[choice2] == choice3][choice3_idx_col].iloc[0] if not df[df[choice2] == choice3].empty else None
+                # st.write(f"You selected: {choice3} | {choice3_idx_val}")
+
+            with c4:
+                choice4 = st.select_slider(f"Wähle eine Saison aus {len(group_slider4)}", options=group_slider4, key="season_slider")
+                # st.write(f"You selected: {choice3}")
+            
+            # Plot a heatmap based on selected choice (no composite columns)
+            # Build the mask from the base columns directly
+            mask = (
+                (df["Geopolitische_Meldeeinheit_Idx"].astype(str) == str(choice1_idx_val)) &
+                (df["Saison"] == choice4)
+            )
+
+            # Add second dimension according to choice2 (NACEr2 or Aufenthaltsland)
+            choice2_idx_col = f"{choice2}_Idx"  # e.g. "NACEr2_Idx" or "Aufenthaltsland_Idx"
+            if choice2_idx_col in df.columns and choice3_idx_val is not None:
+                mask &= (df[choice2_idx_col].astype(str) == str(choice3_idx_val))
+
+            # --- Filter the DataFrame ---
+            df_filtered = df.loc[mask]
+
+            # Labels for plot title / warnings
+            filter_label1 = f"Geopolitische_Meldeeinheit_Idx = {choice1_idx_val}, Saison = {choice4}"
+            filter_label2 = f"{choice2}_Idx = {choice3_idx_val}"
+
+            # --- Show heatmap if data exists ---
+            if not df_filtered.empty:
+                corr = df_filtered[num_cols].corr().round(5)
+                fig11 = px.imshow(
+                    corr,
+                    text_auto=True,
+                    aspect="auto",
+                    title=f"Korrelations-Heatmap: {filter_label2} & {filter_label1}",
+                    color_continuous_scale="RdBu",
+                    zmin=-1,
+                    zmax=1
+                )
+                fig11.update_traces(textfont=dict(size=10))
+                fig11.update_layout(
+                    xaxis=dict(tickfont=dict(size=12)),
+                    yaxis=dict(tickfont=dict(size=12))
+                )
+                st.plotly_chart(fig11, width='stretch')
+
+                if st.button("💾 Aktuell angezeigte Korrelation als CSV speichern"):
+                    corr.to_csv(f"data/correlation_heatmap/correlation_{choice1}_{choice2}_{choice3}_{choice4}.csv")
+
+                with st.expander("Tabellarische Ansicht der ausgewählten Filter"):
+                    st.dataframe(df_filtered)
+            else:
+                st.warning(f"Keine Daten zur Auswahl: {filter_label1} und {filter_label2}")
+        
+        if st.session_state.df_from_json == True:       
+            with st.expander("🔎 Analytische Befunde - Korrelations-Heatmap", expanded=False):
+                # Load a local markdown file
+                md_content = Path("markdown/analytical_findings_correlation_de.md").read_text(encoding="utf-8")
+                # Render as markdown in the app
+                st.markdown(md_content, unsafe_allow_html=False)
     
     
     with tab3:
     # --------------------------------
     # Explorative Analyse
     # --------------------------------
-        st.session_state.tab_ml = False
+        # st.session_state.tab_ml = False
+        
         # Hinweise
         st.caption("Hinweis: Kategorie Spalten werden automatish One-Hot-encodiert; numerische werden skaliert (optiona je nach Modell)")
         with st.expander("Quellndaten (erste 50 Zeilen)", expanded=False):
@@ -1142,31 +1159,31 @@ else:
                 miss = df.isna().sum().sort_values(ascending=True)
                 st.dataframe(miss.to_frame("missing"), width='stretch')
                 
-            c3, c4 = st.columns(2)
-            # Histogram:
-            with c3:
-                if target_col in num_cols:
-                    fig1 = px.histogram(
-                        df,
-                        x=target_col,
-                        nbins=50,
-                        title="Verteilung der Zielvariable"
-                    )
-                    fig1.update_layout(height=350, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig1, width='stretch')
-            # Korrelationsmatrix:
-            with c4:
-                if len(num_cols) > 1:
-                    corr = compute_corr(df, num_cols) # cached
-                    # corr = df[num_cols].corr(numeric_only=True)
-                    fig2 = px.imshow(
-                        corr,
-                        text_auto=False,
-                        title="Korrelationsmatrix",
-                        color_continuous_scale=CUSTOM_CONTINUOUS
-                    )
-                    fig2.update_layout(height=350, margin=dict(l=10, r=10, t=40, b=10))
-                    st.plotly_chart(fig2, width='stretch')
+            # c3, c4 = st.columns(2)
+            # # Histogram:
+            # with c3:
+            #     if target_col in num_cols:
+            #         fig1 = px.histogram(
+            #             df,
+            #             x=target_col,
+            #             nbins=50,
+            #             title="Verteilung der Zielvariable"
+            #         )
+            #         fig1.update_layout(height=350, margin=dict(l=10, r=10, t=40, b=10))
+            #         st.plotly_chart(fig1, width='stretch')
+            # # Korrelationsmatrix:
+            # with c4:
+            #     if len(num_cols) > 1:
+            #         corr = compute_corr(df, num_cols) # cached
+            #         # corr = df[num_cols].corr(numeric_only=True)
+            #         fig2 = px.imshow(
+            #             corr,
+            #             text_auto=False,
+            #             title="Korrelationsmatrix",
+            #             color_continuous_scale=CUSTOM_CONTINUOUS
+            #         )
+            #         fig2.update_layout(height=350, margin=dict(l=10, r=10, t=40, b=10))
+            #         st.plotly_chart(fig2, width='stretch')
             
             # Scatterplot:
             st.markdown("**Relation zum Target**")
@@ -1277,12 +1294,12 @@ else:
                     # Render as markdown in the app
                     st.markdown(md_content2, unsafe_allow_html=False)
             
-# TODO: In progress
+
     with tab4:
-        st.session_state.tab_ml = False
     # --------------------------------
     # Outlier Detection (with skewness handling)
     # --------------------------------
+        # st.session_state.tab_ml = False
 
         with st.expander("🚨 Ausreißer-Erkennung", expanded=True):
             st.markdown("Erkennung auf Basis **selbst gewählter** numerischer Features")
@@ -1363,26 +1380,32 @@ else:
                 # Z-Score: Optional Skewness-Korrektur - Nur Visualisierung
                 # ----------------------------
                 if method == "Z-Score":
-                    cleaned_df = df[cols_for_outlier].dropna()
-                    skew_values = cleaned_df.apply(skew)
-                    highly_skewed = skew_values[skew_values.abs() > 1]
+                    # NEW: Only show the visual-only YJ controls when the global mixed transform is OFF
+                    if not use_mixed_transform:
+                        cleaned_df = df[cols_for_outlier].dropna()
+                        skew_values = cleaned_df.apply(skew)
+                        highly_skewed = skew_values[skew_values.abs() > 1]
 
-                    if not highly_skewed.empty:
-                        st.warning(
-                            f"⚠️ Hohe Skewness entdeckt in: "
-                            f"{', '.join(highly_skewed.index)} "
-                            f"(|skew| > 1.0). Transformation empfohlen!"
-                        )
-                        apply_transform = st.checkbox(
-                            "🔄 Skewness-Korrektur nur für die Visualisierung (Yeo-Johnson)",
-                            value=True,
-                            help="Wendet eine Yeo-Johnson-Transformation an, um schiefe Verteilungen zu stabilisieren.  \n"
-                                "Diese Transformation wird nur für die Visualisierung und Z-Score-Ausreißererkennung verwendet, "
-                                "nicht für das Modelltraining."
-                        )
+                        if not highly_skewed.empty:
+                            st.warning(
+                                f"⚠️ Hohe Skewness entdeckt in: "
+                                f"{', '.join(highly_skewed.index)} "
+                                f"(|skew| > 1.0). Transformation empfohlen!"
+                            )
+                            apply_transform = st.checkbox(
+                                "🔄 Skewness-Korrektur nur für die Visualisierung (Yeo-Johnson)",
+                                value=True,
+                                help="Wendet eine Yeo-Johnson-Transformation an, um schiefe Verteilungen zu stabilisieren.  \n"
+                                    "Diese Transformation wird nur für die Visualisierung und Z-Score-Ausreißererkennung verwendet, "
+                                    "nicht für das Modelltraining."
+                            )
+                        else:
+                            st.info("✅ Keine stark schiefen Verteilungen gefunden — Transformation nicht erforderlich.")
                     else:
-                        st.info("✅ Keine stark schiefen Verteilungen gefunden — Transformation nicht erforderlich.")
-
+                        # Global mixed transform is already active -> avoid duplicate transform UI
+                        apply_transform = False
+                        transformed_successfully = False
+                        
                 # ----------------------------
                 # Berechnung durchführen
                 # ----------------------------
@@ -1398,7 +1421,7 @@ else:
                     # Transformation, falls gewünscht (nur Visualisierung/Z-Score)
                     if apply_transform:
                         try:
-                            df_proc = yeo_johnson_transform(df_transformed, cols_for_outlier)
+                            df_proc = yeo_johnson_transform(df, cols_for_outlier)
                             st.success("✅ Yeo-Johnson-Transformation **nur für Visualisierung** erfolgreich angewendet!")
                             transformed_successfully = True
                         except Exception as e:
@@ -1413,23 +1436,27 @@ else:
                         "📐 Normalisierte Ansicht anzeigen",
                         value=False,
                         help="Zeigt Scatterplots und Boxplots mit transformierten Werten an"
-                    ) if apply_transform and transformed_successfully else False
+                    ) 
+                    
 
                     # Maskenberechnung — immer von den korrekten Daten
-                    if apply_transform and transformed_successfully:
-                        # Z-Score auf transformierten Daten berechnen
-                        mask = detect_outliers_z(df_proc, cols_for_outlier, threshold)
-                        st.session_state.mask = mask  # <-- persist
-                        # Visualisierung: transformiert, wenn gewünscht – sonst RAW
-                        df_for_plot = df_proc.copy() if show_normalized else df.copy()
-                        # Zielspalte immer aus Rohdaten übernehmen (y-Achse konsistent)
-                        df_for_plot[target_col] = df[target_col] # keep target on RAW scale for plotting
+                    # ⬇️ CHANGED: compute mask always on df_transformed for robustness
+                    mask = detect_outliers_z(df_transformed, cols_for_outlier, threshold)
+                    st.session_state.mask = mask  # <-- persist
+
+                    # Visualisierung
+                    if show_normalized:
+                        # If a visual-only YJ was applied, show that; otherwise show df_transformed
+                        if apply_transform and transformed_successfully:
+                            df_for_plot = df_proc.copy()
+                        else:
+                            df_for_plot = st.session_state.df_transformed.copy()
                     else:
-                        # Z-Score auf **df_transformed** (pipeline-Basis), nicht RAW
-                        mask = detect_outliers_z(df_transformed, cols_for_outlier, threshold)
-                        st.session_state.mask = mask  # <-- persist
-                         # Visualisierung: RAW
+                        # Visualisierung: RAW
                         df_for_plot = df.copy()
+                    
+                    # Zielspalte immer aus Rohdaten übernehmen (y-Achse konsistent)
+                    df_for_plot[target_col] = df[target_col]  # keep target on RAW scale for plotting
 
                 else:
                     cont = st.slider("IsolationForest: Contamination", 0.01, 0.20, 0.05, 0.01)
@@ -1517,12 +1544,10 @@ else:
 
 
     with tab5:
-        st.session_state.tab_ml = True
-        # st.info(f"session_state.active_tab = {st.session_state.get('active_tab', None)}")
-
     # --------------------------------
     # ML Model Training
     # --------------------------------
+        # st.session_state.tab_ml = True
 
         # st.number_input("Test", 1, 5, 1)
         # Get transformed df as a basis for training + fallback
@@ -2222,60 +2247,94 @@ else:
                     req_cols = list(getattr(pipe_best, "feature_names_in_", []))
 
                     # --- Step 2: get all distinct fine-grained combinations from training ---
-                    combo_cols = [
-                        c for c in req_cols
-                        if c in df_slice.columns and c not in ["value", "Jahr", "Monat"]
-                    ]
+                    # combo_cols = [
+                    #     c for c in req_cols
+                    #     if c in df_slice.columns and c not in ["value", "Jahr", "Monat", "pandemic_dummy"]
+                    # ]
+                    combo_cols = [c for c in ["Geopolitische_Meldeeinheit", "NACEr2", "Aufenthaltsland"]
+                                 if c in df_slice.columns]
                     distinct_combos = df_slice[combo_cols].drop_duplicates()
 
-                    # --- Step 3: replicate combinations across future months ---
+                    # --- Step 3: compute future dates ---
                     future_dates = pd.date_range(
                         start=last_date + pd.offsets.MonthBegin(1),
                         periods=horizon, freq="MS"
                     )
-                    future_df = pd.DataFrame({
-                        "JahrMonat": future_dates,
-                        "Jahr": future_dates.year,
-                        "Monat": future_dates.month,
-                    })
-                    # cartesian product: each combo × each future date
-                    future_df = future_df.merge(distinct_combos, how="cross")
 
-                    # --- Step 4: fill engineered features if required ---
-                    if "month" in req_cols and "month" not in future_df.columns:
-                        future_df["month"] = future_df["Monat"]
-                    if "Quartal" in req_cols and "Quartal" not in future_df.columns:
-                        future_df["Quartal"] = future_df["Monat"].map({
-                            1: "1", 2: "1", 3: "1",
-                            4: "2", 5: "2", 6: "2",
-                            7: "3", 8: "3", 9: "3",
-                            10: "4", 11: "4", 12: "4"
-                        })
-                    if "Saison" in req_cols and "Saison" not in future_df.columns:
-                        saison_map = {
-                            12: "Winter", 1: "Winter", 2: "Winter",
-                            3: "Frühling", 4: "Frühling", 5: "Frühling",
-                            6: "Sommer", 7: "Sommer", 8: "Sommer",
-                            9: "Herbst", 10: "Herbst", 11: "Herbst"
-                        }
-                        future_df["Saison"] = future_df["Monat"].map(saison_map)
-                    if "Month_cycl_sin" in req_cols and "Month_cycl_sin" not in future_df.columns:
-                        future_df["Month_cycl_sin"] = np.sin(2 * np.pi * future_df["Monat"] / 12)
-                    if "Month_cycl_cos" in req_cols and "Month_cycl_cos" not in future_df.columns:
-                        future_df["Month_cycl_cos"] = np.cos(2 * np.pi * future_df["Monat"] / 12)
-                    if "pandemic_dummy" in req_cols and "pandemic_dummy" not in future_df.columns:
-                        future_df["pandemic_dummy"] = 0
+                    # --- Step 3b: sequential forecast per distinct combination ---
+                    season_map = {12:"Winter",1:"Winter",2:"Winter",3:"Frühling",4:"Frühling",5:"Frühling",
+                                6:"Sommer",7:"Sommer",8:"Sommer",9:"Herbst",10:"Herbst",11:"Herbst"}
 
-                    # --- Step 5: align columns for prediction ---
-                    X_future = future_df.copy()
-                    for c in req_cols:
-                        if c not in X_future.columns:
-                            X_future[c] = np.nan
-                    X_future = X_future[req_cols]
+                    rows = []
+                    season_map = {12:"Winter",1:"Winter",2:"Winter",3:"Frühling",4:"Frühling",5:"Frühling",
+                                6:"Sommer",7:"Sommer",8:"Sommer",9:"Herbst",10:"Herbst",11:"Herbst"}
 
-                    # --- Step 6: predict ---
-                    future_df["value"] = pipe_best.predict(X_future)
+                    # 🔁 iterate series by identity (much faster than boolean masks)
+                    for key_vals, hist in df_slice.groupby(combo_cols, dropna=False):
+                        # turn group key into a dict {col: value}
+                        comb = dict(zip(combo_cols, key_vals if isinstance(key_vals, tuple) else (key_vals,)))
+
+                        hist = hist.sort_values(["Jahr", "Monat"]).copy()
+                        if "JahrMonat" not in hist.columns and {"Jahr","Monat"}.issubset(hist.columns):
+                            hist["JahrMonat"] = pd.to_datetime(
+                                hist["Jahr"].astype(str) + "-" + hist["Monat"].astype(str) + "-01"
+                            )
+
+                        for dt in future_dates:
+                            next_year, next_month = int(dt.year), int(dt.month)
+
+                            # time features
+                            sin_m = float(np.sin(2 * np.pi * next_month / 12))
+                            cos_m = float(np.cos(2 * np.pi * next_month / 12))
+
+                            # lags / moving averages from THIS history
+                            def lag(n):
+                                if len(hist) >= n:
+                                    return float(hist["value"].iloc[-n])
+                                return float(hist["value"].iloc[-1]) if len(hist) else 0.0
+
+                            def ma(k):
+                                if len(hist) >= 1:
+                                    tail = hist["value"].tail(k) if len(hist) >= k else hist["value"]
+                                    return float(tail.mean())
+                                return 0.0
+
+                            feat = {"JahrMonat": dt, "Jahr": next_year, "Monat": next_month, **comb}
+
+                            if "Month_cycl_sin" in req_cols: feat["Month_cycl_sin"] = sin_m
+                            if "Month_cycl_cos" in req_cols: feat["Month_cycl_cos"] = cos_m
+                            if "Lag_1" in req_cols:  feat["Lag_1"]  = lag(1)
+                            if "Lag_3" in req_cols:  feat["Lag_3"]  = lag(3)
+                            if "Lag_12" in req_cols: feat["Lag_12"] = lag(12)
+                            if "MA3" in req_cols:    feat["MA3"]    = ma(3)
+                            if "MA6" in req_cols:    feat["MA6"]    = ma(6)
+                            if "MA12" in req_cols:   feat["MA12"]   = ma(12)
+                            if "Quartal" in req_cols: feat["Quartal"] = ((next_month - 1) // 3) + 1
+                            if "Saison"  in req_cols: feat["Saison"]  = season_map[next_month]
+                            if "pandemic_dummy" in req_cols: feat["pandemic_dummy"] = 0  # future baseline
+
+                            X_next = pd.DataFrame([feat])
+                            # ensure all expected columns exist
+                            for c in req_cols:
+                                if c not in X_next.columns:
+                                    if c in hist.columns and pd.api.types.is_numeric_dtype(hist[c]):
+                                        X_next[c] = 0.0
+                                    else:
+                                        X_next[c] = "NA"
+                            X_next = X_next[req_cols]
+
+                            yhat = float(pipe_best.predict(X_next)[0])
+                            feat["value"] = yhat
+                            rows.append(feat)
+
+                            # roll history forward for THIS series
+                            hist = pd.concat([hist, pd.DataFrame([{"JahrMonat": dt, "Jahr": next_year,
+                                                                "Monat": next_month, "value": yhat, **comb}])],
+                                            ignore_index=True)
+
+                    future_df = pd.DataFrame(rows)
                     future_df["Typ"] = "Forecast"
+
 
                     # --- Step 7: aggregate back to user filter level ---
                     agg_cols = [
@@ -2283,46 +2342,148 @@ else:
                         "NACEr2",
                         "Aufenthaltsland",
                         "JahrMonat",
-                        "Land_Saison",
-                        "NACEr2_Saison",
-                        "Aufenthaltsland_Saison",
-                        "Land_Monat",
+                        # "Land_Saison",
+                        # "NACEr2_Saison",
+                        # "Aufenthaltsland_Saison",
+                        # "Land_Monat",
                         "pandemic_dummy"
                     ]
-                    # df_future_display = (
-                    #     future_df.groupby([c for c in agg_cols if c in future_df.columns], as_index=False)
-                    #             .agg(value=("value", "sum"))
-                    # )
-                    df_future_display = future_df[agg_cols + ["value"]]
-
-                    # Save and display
-                    st.session_state.future_df = future_df
-                    st.subheader("📊 Prognosewerte (aggregiert)")
-                    st.dataframe(df_future_display, width='stretch')
                     
-                    # --- Debug: Show raw fine-grained forecast dataframe ---
-                    st.subheader("🪵 Rohdaten der Prognose (fine-grained)")
-                    st.dataframe(future_df, width='stretch')
+                    # Row-wise display only (no aggregation). Pick only columns that exist.
+                    display_cols = [c for c in agg_cols if c in future_df.columns]
 
-                    # --- Aggregation to Tab 2 granularity (compare against raw) ---
-                    agg_level = [
-                        "JahrMonat",
-                        "Geopolitische_Meldeeinheit",
-                        "NACEr2",
-                        "Aufenthaltsland",
-                        "Saison",
-                    ]
-                    df_future_agg = (
-                        future_df.groupby(agg_level, dropna=False)["value"]
-                        .sum()
-                        .reset_index()
+                    # Ensure "value" is included and comes last
+                    value_col = ["value"] if "value" in future_df.columns else []
+                    if display_cols or value_col:
+                        df_future_display = future_df.loc[:, display_cols + value_col].copy()
+                    else:
+                        # Fallback if none of the agg_cols exist – still no aggregation
+                        fallback = [c for c in ["Jahr", "Monat", "value"] if c in future_df.columns]
+                        df_future_display = future_df.loc[:, fallback].copy()
+
+
+                    # Keep all rows per Aufenthaltsland/Typ, only sort for readability
+                    sort_order = [c for c in ["JahrMonat", "Geopolitische_Meldeeinheit", "NACEr2", "Aufenthaltsland"] if c in display_cols]
+                    if sort_order:
+                        df_future_display = df_future_display.sort_values(sort_order).reset_index(drop=True)
+
+                    # Format only the display
+                    if "value" in df_future_display.columns:
+                        df_future_display["value"] = (
+                            pd.to_numeric(df_future_display["value"], errors="coerce")
+                            .round(0)
+                            .astype("Int64")  # nullable int so it won’t fail on NaN
+                        )
+                    
+                    # --- Add past 6 months (same filters) and combine with forecast ---
+
+                    # Ensure JahrMonat exists in the slice
+                    if "JahrMonat" not in df_slice.columns and {"Jahr", "Monat"}.issubset(df_slice.columns):
+                        df_slice = df_slice.copy()
+                        df_slice["JahrMonat"] = pd.to_datetime(
+                            df_slice["Jahr"].astype(str) + "-" + df_slice["Monat"].astype(str) + "-01"
+                        )
+
+                    # Last 6 months up to the last historical month used for forecasting
+                    past_start = (last_date - pd.DateOffset(months=5))
+                    df_past = df_slice[(df_slice["JahrMonat"] >= past_start) & (df_slice["JahrMonat"] <= last_date)].copy()
+
+                    # Align past display columns to the same selection you used for the forecast table
+                    if display_cols or value_col:
+                        past_cols = [c for c in (display_cols + value_col) if c in df_past.columns]
+                        df_past_display = df_past.loc[:, past_cols].copy()
+                    else:
+                        fallback = [c for c in ["Jahr", "Monat", "value"] if c in df_past.columns]
+                        df_past_display = df_past.loc[:, fallback].copy()
+
+                    # Tag & combine
+                    df_past_display["Typ"] = "Historie"
+                    df_future_display_with_tag = df_future_display.copy()
+                    df_future_display_with_tag["Typ"] = "Forecast"
+
+                    df_past_future = pd.concat(
+                        [df_past_display, df_future_display_with_tag],
+                        ignore_index=True
                     )
 
-                    st.subheader("📊 Aggregierte Prognose (Tab 2 Level)")
-                    st.dataframe(df_future_agg, width='stretch')
+                    # Nice sort if JahrMonat is present
+                    sort_cols = [c for c in ["JahrMonat", "Geopolitische_Meldeeinheit", "NACEr2", "Aufenthaltsland", "Typ"] if c in df_past_future.columns]
+                    if sort_cols:
+                        df_past_future = df_past_future.sort_values(sort_cols).reset_index(drop=True)
 
+                    # import plotly.express as px
+                    import plotly.graph_objects as go
 
+                    fig = go.Figure()
+                    chart_title = "Vergangenheit (6 Monate) & Prognose - Ausland vs. Inland"
 
+                    # Define colors for Ausland/Inland
+                    color_map = {
+                        "Ausland": "rgba(0, 128, 200, .4)",  # solid blue
+                        "Inland": "rgba(50, 120, 120, .4)"    # solid green
+                    }
+
+                    # Iterate over Aufenhaltsland × Typ combinations
+                    for land in df_past_future["Aufenthaltsland"].unique():
+                        for typ in ["Historie", "Forecast"]:
+                            df_sub = df_past_future[
+                                (df_past_future["Aufenthaltsland"] == land) &
+                                (df_past_future["Typ"] == typ)
+                            ]
+                            if df_sub.empty:
+                                continue
+
+                            # Adjust opacity for forecast (lighter)
+                            if typ == "Forecast":
+                                base_color = color_map[land].replace("1)", "0.4)")  # 50% opacity
+                            else:
+                                base_color = color_map[land]
+
+                            # Add line
+                            fig.add_trace(go.Scatter(
+                                x=df_sub["JahrMonat"],
+                                y=df_sub["value"],
+                                mode="lines",
+                                name=f"{land} - {typ}",
+                                line=dict(color=base_color, width=2, dash="solid" if typ=="Historie" else "dash")
+                            ))
+
+                            # Add filled area
+                            fig.add_trace(go.Scatter(
+                                x=df_sub["JahrMonat"],
+                                y=df_sub["value"],
+                                mode="lines",
+                                line=dict(width=0),
+                                fill="tozeroy",
+                                fillcolor=base_color.replace("1)", "0.2)"),  # lighter for shading
+                                showlegend=False,
+                                hoverinfo="skip"
+                            ))
+
+                    # Add red vertical line to mark separation
+                    forecast_start = df_past_future.loc[df_past_future["Typ"]=="Forecast", "JahrMonat"].min()
+                    fig.add_vline(
+                        x=forecast_start, line_width=2, line_dash="solid", line_color="red"
+                    )
+
+                    fig.update_layout(
+                        title=chart_title,
+                        xaxis_title="Monat",
+                        yaxis_title="Übernachtungen",
+                        yaxis_tickformat=",",
+                        height=500,
+                        template="plotly_dark"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    
+                    # Save and display
+                    st.session_state.future_df = future_df
+                    st.subheader("📊 Vergangenheit + Prognose (letzte 6 Monate + Horizont)")
+                    st.dataframe(df_past_future, width='stretch')
+
+                
 
 # Footer
 st.caption("Made with ❤️ & ☕")
