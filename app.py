@@ -1135,7 +1135,7 @@ else:
         
         # Hinweise
         st.caption("Hinweis: Kategorie Spalten werden automatish One-Hot-encodiert; numerische werden skaliert (optiona je nach Modell)")
-        with st.expander("Quellndaten (erste 50 Zeilen)", expanded=False):
+        with st.expander("Quellendaten (erste 50 Zeilen)", expanded=False):
             st.dataframe(df.head(50))
 
         # Zielspalte wählen:
@@ -1678,9 +1678,9 @@ else:
                 
             # Always show last results if available (no heavy compute)
             if "autopick_results" in st.session_state:
-                st.dataframe(st.session_state.autopick_results, width='stretch')
-                st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
-
+                # st.dataframe(st.session_state.autopick_results, width='stretch')
+                # st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
+                pass
             # FIXED: Should here be used st.session_state.best_model_name?
             # Modell erstellen
             # model = build_model(st.session_state.model_name)
@@ -1824,181 +1824,138 @@ else:
         if "train_r2" in st.session_state:    
             st.subheader("📊 Performance")
             
-           # Use actual session keys in priority order
+            # Select which pipeline to use for KPIs (any available)
             pipe_for_kpi = (
                 st.session_state.get("pipe")
                 or st.session_state.get("trained_pipe")
                 or st.session_state.get("best_trained_pipe")
             )
+
             if pipe_for_kpi:
-                # use stored y_pred / metrics if present; otherwise compute lightweight metrics on cached test split
-                # (Anzeige der gespeicherten Kennzahlen – nur wenn vorhanden)
-                train_r2   = st.session_state.get("train_r2", None)
-                test_r2    = st.session_state.get("test_r2", None)
-                train_mae  = st.session_state.get("train_mae", None)
-                test_mae   = st.session_state.get("test_mae", None)
-                train_rmse = st.session_state.get("train_rmse", None)
-                test_rmse  = st.session_state.get("test_rmse", None)
-                train_mape = st.session_state.get("train_mape", None)
-                test_mape  = st.session_state.get("test_mape", None)
 
-                cols1 = st.columns(4)
-                if train_r2 is not None:  cols1[0].metric("Train R²", f"{train_r2:.3f}")
-                if test_r2 is not None:   cols1[1].metric("Test R²",  f"{test_r2:.3f}")
-                if train_mae is not None: cols1[2].metric("Train MAE", f"{train_mae:.2f}")
-                if test_mae is not None:  cols1[3].metric("Test MAE",  f"{test_mae:.2f}")
+                # --- Detect outdated model results ---
+                current_state = {
+                    "df_shape": df.shape,
+                    "model_name": st.session_state.get("model_name"),
+                    "test_size": st.session_state.get("test_size"),
+                    "random_state": st.session_state.get("random_state"),
+                    "apply_skew_correction_global": st.session_state.get("apply_skew_correction_global"),
+                    "cols_for_outlier": sorted(st.session_state.get("cols_for_outlier", [])),
+                    "uploaded_filename": st.session_state.get("uploaded_filename", None),
 
-                cols2 = st.columns(4)
-                if train_rmse is not None: cols2[0].metric("Train RMSE", f"{train_rmse:.2f}")
-                if test_rmse is not None:  cols2[1].metric("Test RMSE",  f"{test_rmse:.2f}")
-                if train_mape is not None: cols2[2].metric("Train MAPE", f"{train_mape:.2%}" if train_mape < 1 else f"{train_mape:.2f}")
-                if test_mape is not None:  cols2[3].metric("Test MAPE",  f"{test_mape:.2%}" if test_mape  < 1 else f"{test_mape:.2f}")
-            else:
-                # No-op: we are already inside 'if "train_r2" in st.session_state'
-                pass
-            
-            # --- Detect outdated model results ---
-            # Create a dict of the CURRENT UI + data settings
-            current_state = {
-                "df_shape": df.shape,
-                "model_name": st.session_state.get("model_name"),
-                "test_size": st.session_state.get("test_size"),
-                "random_state": st.session_state.get("random_state"),
-                "apply_skew_correction_global": st.session_state.get("apply_skew_correction_global"),
-                "cols_for_outlier": sorted(st.session_state.get("cols_for_outlier", [])),
-                "uploaded_filename": st.session_state.get("uploaded_filename", None),
+                    # RandomForest-specific
+                    "n_estimators": locals().get("n_estimators", None),
+                    "max_depth": locals().get("max_depth", None),
+                    "max_features_choice": locals().get("max_features_choice", None),
 
-                # RandomForest-specific
-                "n_estimators": locals().get("n_estimators", None),
-                "max_depth": locals().get("max_depth", None),
-                "max_features_choice": locals().get("max_features_choice", None),
+                    # GradientBoosting-specific
+                    "learning_rate": locals().get("learning_rate", None),
+                }
 
-                # GradientBoosting-specific
-                "learning_rate": locals().get("learning_rate", None),
-            }
-            
-                # Outlier detection options
-                # Only include method-specific params if at least one feature is selected
-            if cols_for_outlier:
-                current_state.update({
-                    "outlier_method": locals().get("method", None),
-                    "z_threshold": locals().get("threshold", None),
-                    "iqr_factor": locals().get("factor", None),
-                    "apply_transform": locals().get("apply_transform", None),
-                })
-            else:
-                # Set stable defaults when no features are selected
-                current_state.update({
-                    "outlier_method": None,
-                    "z_threshold": None,
-                    "iqr_factor": None,
-                    "apply_transform": False,
-                })
-            
-            # Normalize states before comparison
-            def normalize_state(state: dict, cols: list) -> dict:
-                """Ensure consistent defaults & ignore stale outlier params when no cols are selected"""
-                normalized = dict(state)  # shallow copy
-                
-                # When NO features are selected, force defaults
-                if not cols:
-                    normalized["outlier_method"] = None
-                    normalized["z_threshold"] = None
-                    normalized["iqr_factor"] = None
-                    normalized["apply_transform"] = False
-                
-                # Fill missing defaults safely
-                for key, default in {
-                    "outlier_method": None,
-                    "z_threshold": None,
-                    "iqr_factor": None,
-                    "apply_transform": False,
-                }.items():
-                    if key not in normalized:
-                        normalized[key] = default
+                if cols_for_outlier:
+                    current_state.update({
+                        "outlier_method": locals().get("method", None),
+                        "z_threshold": locals().get("threshold", None),
+                        "iqr_factor": locals().get("factor", None),
+                        "apply_transform": locals().get("apply_transform", None),
+                    })
+                else:
+                    current_state.update({
+                        "outlier_method": None,
+                        "z_threshold": None,
+                        "iqr_factor": None,
+                        "apply_transform": False,
+                    })
 
-                return normalized
+                def normalize_state(state: dict, cols: list) -> dict:
+                    normalized = dict(state)
+                    if not cols:
+                        normalized["outlier_method"] = None
+                        normalized["z_threshold"] = None
+                        normalized["iqr_factor"] = None
+                        normalized["apply_transform"] = False
+                    for key, default in {
+                        "outlier_method": None,
+                        "z_threshold": None,
+                        "iqr_factor": None,
+                        "apply_transform": False,
+                    }.items():
+                        if key not in normalized:
+                            normalized[key] = default
+                    return normalized
 
-            trained_state = normalize_state(
-                st.session_state.get("last_trained_state", {}), cols_for_outlier
-            )
-            current_state = normalize_state(current_state, cols_for_outlier)
-
-            # Check if last trained state differs from the current UI state
-            # Show warning if training state doesn't match current settings
-            if trained_state != current_state:
-                st.warning(
-                    "⚠️ Hinweis: Die unten angezeigten Ergebnisse stammen aus einem vorherigen Training "
-                    "und spiegeln möglicherweise **nicht** die aktuellen Änderungen wider. "
-                    "Bitte trainiere das Modell erneut."
+                trained_state = normalize_state(
+                    st.session_state.get("last_trained_state", {}), cols_for_outlier
                 )
-            
-            # Use saved values
-            train_r2 = st.session_state.train_r2
-            test_r2 = st.session_state.test_r2
-            train_rmse = st.session_state.train_rmse
-            test_rmse = st.session_state.test_rmse
-            train_mae = st.session_state.train_mae
-            test_mae = st.session_state.test_mae
-            y_test = st.session_state.y_test
-            y_test_pred = st.session_state.y_test_pred
+                current_state = normalize_state(current_state, cols_for_outlier)
 
-            # ------------------------------
-            # Metric-Anzeige
-            # ------------------------------
-            c1, c2, c3 = st.columns(3)
+                if trained_state != current_state:
+                    st.warning(
+                        "⚠️ Hinweis: Die unten angezeigten Ergebnisse stammen aus einem vorherigen Training "
+                        "und spiegeln möglicherweise **nicht** die aktuellen Änderungen wider. "
+                        "Bitte trainiere das Modell erneut."
+                    )
 
-            with c1:
-                st.markdown("**Train R²**", help=(
-                    "R² (Bestimmtheitsmaß) für die Trainingsdaten.\n"
-                    "- 1.0 = perfekte Anpassung\n"
-                    "- 0 = keine Erklärungskraft\n\n"
-                    "⚠️ Ein sehr hohes Train R² bei deutlich niedrigerem Test R² kann auf Overfitting hindeuten."
-                ))
-                st.metric(" ", f"{train_r2:.3f}")
+                # --- Use saved metric values from session_state ---
+                train_r2   = st.session_state.get("train_r2")
+                test_r2    = st.session_state.get("test_r2")
+                train_rmse = st.session_state.get("train_rmse")
+                test_rmse  = st.session_state.get("test_rmse")
+                train_mae  = st.session_state.get("train_mae")
+                test_mae   = st.session_state.get("test_mae")
+                train_mape = st.session_state.get("train_mape")
+                test_mape  = st.session_state.get("test_mape")
 
-            with c2:
-                st.markdown("**Test R²**", help=(
-                    "R² (Bestimmtheitsmaß) für die Testdaten.\n"
-                    "Je näher an 1.0, desto besser erklärt das Modell die Varianz unbekannter Daten.\n\n"
-                    "👉 Dies ist die wichtigste Kennzahl zur Beurteilung der Generalisierungsfähigkeit."
-                ))
-                st.metric(" ", f"{test_r2:.3f}")
+                # ------------------------------
+                # Metric-Anzeige (restructured layout)
+                # ------------------------------
 
-            with c3:
-                st.markdown("**Generalization Gap ΔR²**", help=(
-                    "Differenz zwischen Train- und Test-R².\n"
-                    "Ein kleiner Wert = gute Generalisierung.\n"
-                    "Ein großer positiver Wert = Overfitting."
-                ))
-                st.metric(" ", f"{(train_r2 - test_r2):.3f}")
+                # Row 1: Train metrics
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    if train_r2 is not None:
+                        st.markdown("**Train R²**", help="Bestimmtheitsmaß für Trainingsdaten (1.0 = perfekt).")
+                        st.metric(" ", f"{train_r2:.3f}")
+                with c2:
+                    if train_mae is not None:
+                        st.markdown("**Train MAE**", help="Mittlerer absoluter Fehler (Training). Je kleiner, desto besser.")
+                        st.metric(" ", f"{train_mae:.4f}")
+                with c3:
+                    if train_rmse is not None:
+                        st.markdown("**Train RMSE**", help="Root Mean Squared Error (Training). Je kleiner, desto besser.")
+                        st.metric(" ", f"{train_rmse:.4f}")
+                with c4:
+                    if train_mape is not None:
+                        st.markdown("**Train MAPE**", help="Mittlerer absoluter prozentualer Fehler (Training).")
+                        st.metric(" ", f"{train_mape:.2%}" if train_mape < 1 else f"{train_mape:.4f}")
 
-            c4, c5, c6 = st.columns(3)
-            with c4:
-                st.markdown("**Test RMSE**", help=(
-                    "Root Mean Squared Error (Wurzel des mittleren quadratischen Fehlers).\n"
-                    "- Misst die durchschnittliche Abweichung zwischen Vorhersage und Realität.\n"
-                    "- Größere Fehler werden stärker bestraft (Quadrat).\n"
-                    "👉 Je kleiner, desto besser."
-                ))
-                st.metric(" ", f"{test_rmse:.4f}")
+                # Row 2: Test metrics
+                c5, c6, c7, c8 = st.columns(4)
+                with c5:
+                    if test_r2 is not None:
+                        st.markdown("**Test R²**", help="Bestimmtheitsmaß für Testdaten. Wichtigste Generalisierungskennzahl.")
+                        st.metric(" ", f"{test_r2:.3f}")
+                with c6:
+                    if test_mae is not None:
+                        st.markdown("**Test MAE**", help="Mittlerer absoluter Fehler (Test). Je kleiner, desto besser.")
+                        st.metric(" ", f"{test_mae:.4f}")
+                with c7:
+                    if test_rmse is not None:
+                        st.markdown("**Test RMSE**", help="Root Mean Squared Error (Test). Je kleiner, desto besser.")
+                        st.metric(" ", f"{test_rmse:.4f}")
+                with c8:
+                    if test_mape is not None:
+                        st.markdown("**Test MAPE**", help="Mittlerer absoluter prozentualer Fehler (Test).")
+                        st.metric(" ", f"{test_mape:.2%}" if test_mape < 1 else f"{test_mape:.4f}")
 
-            with c5:
-                st.markdown("**Test MAE**", help=(
-                    "Mean Absolute Error (mittlerer absoluter Fehler).\n"
-                    "- Misst die durchschnittliche Abweichung (in Originaleinheiten).\n"
-                    "- Weniger empfindlich gegenüber Ausreißern als RMSE.\n"
-                    "👉 Je kleiner, desto besser."
-                ))
-                st.metric(" ", f"{test_mae:.4f}")
-
-            with c6:
-                st.markdown("**Train RMSE**", help=(
-                    "Root Mean Squared Error auf den Trainingsdaten.\n"
-                    "- Gibt an, wie gut das Modell die Trainingsdaten angepasst hat.\n"
-                    "👉 Vergleiche mit Test-RMSE: große Unterschiede deuten auf Overfitting hin."
-                ))
-                st.metric(" ", f"{train_rmse:.4f}")
+                # Row 3: Generalization Gap
+                c9 = st.columns(1)[0]
+                if train_r2 is not None and test_r2 is not None:
+                    c9.markdown("**Train Generalization Gap ΔR²**", help=(
+                        "Differenz Train- vs. Test-R².\n"
+                        "Klein = gute Generalisierung, groß = Overfitting."
+                    ))
+                    c9.metric(" ", f"{(train_r2 - test_r2):.3f}")
 
 
             # Cross-Validation durchführen
@@ -2193,6 +2150,10 @@ else:
                 except Exception as e:
                     st.error(f"Fehler beim Laden des gespeicherten Modells: {e}")
                     pipe_best = None
+                    
+        # 🔎 DEBUG: check what features the model is actually trained on
+        if pipe_best is not None:
+            st.write("Model features:", pipe_best.feature_names_in_)
 
         if not pipe_best:
             st.info("⚠️ Bitte trainiere ein Modell in Tab 5 oder speichere ein Auto-Pick-Modell.")
@@ -2313,6 +2274,21 @@ else:
                             if "Saison"  in req_cols: feat["Saison"]  = season_map[next_month]
                             if "pandemic_dummy" in req_cols: feat["pandemic_dummy"] = 0  # future baseline
 
+                            # NEW: set *_Idx and composite categorical features from THIS group's history
+                            for col_idx in ["Geopolitische_Meldeeinheit_Idx", "NACEr2_Idx", "Aufenthaltsland_Idx"]:
+                                if col_idx in req_cols and col_idx in hist.columns:
+                                    feat[col_idx] = hist[col_idx].iloc[0]
+
+                            if "Land_Saison" in req_cols and "Geopolitische_Meldeeinheit_Idx" in req_cols:
+                                feat["Land_Saison"] = f"{comb['Geopolitische_Meldeeinheit']}_{season_map[next_month]}"
+                            if "NACEr2_Saison" in req_cols and "NACEr2_Idx" in req_cols:
+                                feat["NACEr2_Saison"] = f"{comb['NACEr2']}_{season_map[next_month]}"
+                            if "Aufenthaltsland_Saison" in req_cols and "Aufenthaltsland_Idx" in req_cols:
+                                feat["Aufenthaltsland_Saison"] = f"{comb['Aufenthaltsland']}_{season_map[next_month]}"
+                            if "Land_Monat" in req_cols and "Geopolitische_Meldeeinheit_Idx" in req_cols:
+                                feat["Land_Monat"] = f"{comb['Geopolitische_Meldeeinheit']}_{next_month}"
+
+                            
                             X_next = pd.DataFrame([feat])
                             # ensure all expected columns exist
                             for c in req_cols:
