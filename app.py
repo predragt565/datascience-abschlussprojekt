@@ -1622,59 +1622,58 @@ else:
         with st.expander("🔎 Modellvalidierung & Auto-Pick vs. Seasonal Naïve"):
             run_pick = st.button("▶️ Auto-Pick jetzt ausführen", key="btn_autopick")
             if run_pick:
-                # Candidate models (extendable)
-                candidates = {
-                    "Ridge": Ridge(alpha=1.0, random_state=st.session_state.random_state),
-                    "Lasso": Lasso(alpha=0.001, random_state=st.session_state.random_state),
-                    "ElasticNet": ElasticNet(alpha=0.001, l1_ratio=0.5, random_state=st.session_state.random_state),
-                    "RandomForest": RandomForestRegressor(n_estimators=300, random_state=st.session_state.random_state),
-                    "GradientBoosting": GradientBoostingRegressor(n_estimators=300, random_state=st.session_state.random_state),
-                }
+                with st.spinner("🔄 Trainiere Auto-Pick Modelle, bitte warten..."):
+                    # Candidate models (extendable)
+                    candidates = {
+                        "Ridge": Ridge(alpha=1.0, random_state=st.session_state.random_state),
+                        "Lasso": Lasso(alpha=0.001, random_state=st.session_state.random_state),
+                        "ElasticNet": ElasticNet(alpha=0.001, l1_ratio=0.5, random_state=st.session_state.random_state),
+                        "RandomForestRegressor": RandomForestRegressor(n_estimators=300, random_state=st.session_state.random_state),
+                        "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=300, random_state=st.session_state.random_state),
+                    }
 
-                # Seasonal naive baseline
-                use_seasonal_naive = "Lag_12" in X.columns
+                    # Seasonal naive baseline
+                    use_seasonal_naive = "Lag_12" in X.columns
 
-                tscv = TimeSeriesSplit(n_splits=5)
-                results = []
+                    tscv = TimeSeriesSplit(n_splits=5)
+                    results = []
 
-                for name, model in candidates.items():
-                    pipe = Pipeline(steps=[("prep", preprocessor), ("model", model)])
-                    maes, rmses, mapes, maes_naive = [], [], [], []
+                    for name, model in candidates.items():
+                        pipe = Pipeline(steps=[("prep", preprocessor), ("model", model)])
+                        maes, rmses, mapes, maes_naive = [], [], [], []
 
-                    for train_idx, test_idx in tscv.split(X):
-                        X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
-                        y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
+                        for train_idx, test_idx in tscv.split(X):
+                            X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+                            y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
 
-                        pipe.fit(X_tr, y_tr)
-                        y_hat = pipe.predict(X_te)
+                            pipe.fit(X_tr, y_tr)
+                            y_hat = pipe.predict(X_te)
 
-                        # Baseline
-                        if use_seasonal_naive:
-                            y_naive = X_te["Lag_12"].values
-                        else:
-                            y_naive = np.roll(y_te.values, 1)
-                            y_naive[0] = y_tr.values[-1]
+                            # Baseline
+                            if use_seasonal_naive:
+                                y_naive = X_te["Lag_12"].values
+                            else:
+                                y_naive = np.roll(y_te.values, 1)
+                                y_naive[0] = y_tr.values[-1]
 
-                        maes.append(mean_absolute_error(y_te, y_hat))
-                        rmses.append(root_mean_squared_error(y_te, y_hat))
-                        mapes.append(mean_absolute_percentage_error(y_te, y_hat))
-                        maes_naive.append(mean_absolute_error(y_te, y_naive))
+                            maes.append(mean_absolute_error(y_te, y_hat))
+                            rmses.append(root_mean_squared_error(y_te, y_hat))
+                            mapes.append(mean_absolute_percentage_error(y_te, y_hat))
+                            maes_naive.append(mean_absolute_error(y_te, y_naive))
 
-                    results.append({
-                        "model": name,
-                        "MAE_mean": float(np.mean(maes)),
-                        "RMSE_mean": float(np.mean(rmses)),
-                        "MAPE_mean": float(np.mean(mapes)),
-                        "MAE_naive_mean": float(np.mean(maes_naive))
-                    })
+                        results.append({
+                            "model": name,
+                            "MAE_mean": float(np.mean(maes)),
+                            "RMSE_mean": float(np.mean(rmses)),
+                            "MAPE_mean": float(np.mean(mapes)),
+                            "MAE_naive_mean": float(np.mean(maes_naive))
+                        })
 
-                res_df = pd.DataFrame(results).sort_values("MAE_mean")
-                st.dataframe(res_df, width='stretch')
-
-                best_name = res_df.iloc[0]["model"]
-                st.success(f"Beste Auswahl nach MAE: **{best_name}**")
-                st.session_state.best_model_name = best_name
-                st.session_state.autopick_results = res_df
+                    res_df = pd.DataFrame(results).sort_values("MAE_mean")
+                    st.session_state.best_model_name = res_df.iloc[0]["model"]
+                    st.session_state.autopick_results = res_df
+                    st.dataframe(res_df, width="stretch")
+                    st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
                 
             # Always show last results if available (no heavy compute)
             if "autopick_results" in st.session_state:
@@ -1702,42 +1701,43 @@ else:
             )
             
             # --------------------------
-            # Modelltrainieren
+            # Modelltrainieren und speichern
             # --------------------------
 
             # Check if we already have stored results in the session
             if "model_trained" not in st.session_state:
                 st.session_state.model_trained = False
             
-            # DONE: Run the best model and save as Pickle for re-use
+            # Run the best model and save as Pickle for re-use
             # Beste Modell führen und speichern
             save_pick = st.button("💾 Bestes Modell speichern & für Forecast laden", key="btn_save_pick", 
                                   disabled=("best_model_name" not in st.session_state))
             if save_pick:
-                best_name = st.session_state.get("best_model_name", None)
-                if not best_name:
-                    st.error("Bitte zuerst Auto-Pick ausführen (▶️ Auto-Pick jetzt ausführen).")
-                else:
-                    # Refit the best on FULL data using your existing preprocessor
-                    best_model = build_model(best_name)   # ← no dependency on local 'candidates'
-                    best_pipe = Pipeline(steps=[("prep", preprocessor), ("model", best_model)])
-                    # Modelltraining
-                    with st.spinner("Trainiere Best-Modell..."):
+                with st.spinner("💾 Trainiere und Speichere bestes Modell..."):
+                    best_name = st.session_state.get("best_model_name", None)
+                    if not best_name:
+                        st.error("Bitte zuerst Auto-Pick ausführen (▶️ Auto-Pick jetzt ausführen).")
+                    else:
+                        # Refit the best on FULL data using your existing preprocessor
+                        best_model = build_model(best_name)   # ← no dependency on local 'candidates'
+                        best_pipe = Pipeline(steps=[("prep", preprocessor), ("model", best_model)])
+                        # Modelltraining - Train full dataset
+                        # with st.spinner("Trainiere Best-Modell..."):
                         best_pipe.fit(X, y)
 
-                    # Persist to disk
-                    models_dir = "models"
-                    os.makedirs(models_dir, exist_ok=True)
-                    ts = time.strftime("%Y%m%d_%H%M%S")
-                    base_name = st.session_state.get("uploaded_filename", "dataset")
-                    model_path = os.path.join(models_dir, f"{base_name}_{best_name}_{ts}.pkl")
-                    dump(best_pipe, model_path)
-                    st.success(f"Gespeichert: {model_path}")
-                    
-                    # Keep it in memory so KPI/Forecast can use it immediately
-                    st.session_state.best_model_path = model_path
-                    st.session_state.best_model_name = best_name
-                    st.session_state.best_trained_pipe = best_pipe
+                        # Persist to disk
+                        models_dir = "models"
+                        os.makedirs(models_dir, exist_ok=True)
+                        ts = time.strftime("%Y%m%d_%H%M%S")
+                        base_name = st.session_state.get("uploaded_filename", "dataset")
+                        model_path = os.path.join(models_dir, f"{base_name}_{best_name}_{ts}.pkl")
+                        dump(best_pipe, model_path)
+                        
+                        # Keep it in memory so KPI/Forecast can use it immediately
+                        st.session_state.best_model_path = model_path
+                        st.session_state.best_model_name = best_name
+                        st.session_state.best_trained_pipe = best_pipe
+                        st.success(f"✅ Modell **{best_name}** erfolgreich gespeichert unter: {model_path}")
 
         # Beginnt erst nach dem Drücken der Taste
         run_model = st.button("🚀 Ausgewählte Modell trainieren", key="btn_own_pick")
