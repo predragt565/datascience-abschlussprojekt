@@ -3,6 +3,7 @@ from pathlib import Path
 import csv
 import io
 import os, time
+import datetime
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -20,7 +21,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, IsolationForest
 from sklearn.model_selection import train_test_split, cross_val_score, KFold, TimeSeriesSplit
-from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+from sklearn.metrics import root_mean_squared_error, r2_score, mean_absolute_error, mean_absolute_percentage_error
 
 from joblib import dump
 from scipy import stats
@@ -1622,6 +1623,8 @@ else:
         with st.expander("🔎 Modellvalidierung & Auto-Pick vs. Seasonal Naïve"):
             run_pick = st.button("▶️ Auto-Pick jetzt ausführen", key="btn_autopick")
             if run_pick:
+                # Start timing
+                train_start = datetime.datetime.now()
                 with st.spinner("🔄 Trainiere Auto-Pick Modelle, bitte warten..."):
                     # Candidate models (extendable)
                     candidates = {
@@ -1669,18 +1672,26 @@ else:
                             "MAE_naive_mean": float(np.mean(maes_naive))
                         })
 
+                    # End timing
+                    train_end = datetime.datetime.now()
+                    train_duration = str(train_end - train_start)
+                    
                     res_df = pd.DataFrame(results).sort_values("MAE_mean")
+                    
                     st.session_state.best_model_name = res_df.iloc[0]["model"]
                     st.session_state.autopick_results = res_df
-                    st.dataframe(res_df, width="stretch")
-                    st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
+                    st.session_state.train_duration = train_duration
+                    st.session_state.autopick_message = (
+                            f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}** | Trainingsdauer: {train_duration}"
+                        )
                 
             # Always show last results if available (no heavy compute)
             if "autopick_results" in st.session_state:
-                # st.dataframe(st.session_state.autopick_results, width='stretch')
-                # st.success(f"Beste Auswahl nach MAE: **{st.session_state.best_model_name}**")
-                pass
-            # FIXED: Should here be used st.session_state.best_model_name?
+                st.dataframe(st.session_state.autopick_results, width="stretch")
+            if "autopick_message" in st.session_state:
+                st.success(st.session_state.autopick_message)
+                
+                
             # Modell erstellen
             # model = build_model(st.session_state.model_name)
             use_best = st.checkbox("⚡ Bestes Modell aus Auto-Pick verwenden (überschreibt Sidebar)", value=False, key="use_auto_pick")
@@ -1724,6 +1735,31 @@ else:
                         # Modelltraining - Train full dataset
                         # with st.spinner("Trainiere Best-Modell..."):
                         best_pipe.fit(X, y)
+                        
+                        # --- Compute metrics for best model (Auto-Pick) on a fresh split and cache them ---
+                        X_train, X_test, y_train, y_test = train_test_split(
+                            X, y,
+                            test_size=st.session_state.get("test_size", 0.2),
+                            random_state=st.session_state.get("random_state", 42)
+                        )
+                        y_train_pred = best_pipe.predict(X_train)
+                        y_test_pred  = best_pipe.predict(X_test)
+
+                        st.session_state.best_train_r2   = r2_score(y_train, y_train_pred)
+                        st.session_state.best_test_r2    = r2_score(y_test,  y_test_pred)
+                        st.session_state.best_train_rmse = root_mean_squared_error(y_train, y_train_pred)
+                        st.session_state.best_test_rmse  = root_mean_squared_error(y_test,  y_test_pred)
+                        st.session_state.best_train_mae  = mean_absolute_error(y_train, y_train_pred)
+                        st.session_state.best_test_mae   = mean_absolute_error(y_test,  y_test_pred)
+
+                        def _mape(y_true, y_pred):
+                            y_true = np.asarray(y_true); y_pred = np.asarray(y_pred)
+                            mask = y_true != 0
+                            return float(np.mean(np.abs((y_true - y_pred)[mask] / y_true[mask]))) if mask.any() else None
+
+                        st.session_state.best_train_mape = _mape(y_train, y_train_pred)
+                        st.session_state.best_test_mape  = _mape(y_test,  y_test_pred)
+
 
                         # Persist to disk
                         models_dir = "models"
@@ -1743,6 +1779,13 @@ else:
         run_model = st.button("🚀 Ausgewählte Modell trainieren", key="btn_own_pick")
         if run_model:
             
+            # Clear cached Auto-Pick metrics so manual results take priority
+            for key in [
+                "best_train_r2","best_test_r2","best_train_rmse","best_test_rmse",
+                "best_train_mae","best_test_mae","best_train_mape","best_test_mape"
+            ]:
+                st.session_state.pop(key, None)
+                    
             # Train/Test-Split einbauen
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, 
@@ -1821,15 +1864,25 @@ else:
         # 📊 Performance-Anzeige
         # --------------------------
 
-        if "train_r2" in st.session_state:    
+        has_best_metrics = all(k in st.session_state for k in [
+            "best_train_r2","best_test_r2","best_train_rmse","best_test_rmse","best_train_mae","best_test_mae"
+        ])
+        if ("train_r2" in st.session_state) or has_best_metrics:
+                      
             st.subheader("📊 Performance")
             
-            # Select which pipeline to use for KPIs (any available)
-            pipe_for_kpi = (
-                st.session_state.get("pipe")
-                or st.session_state.get("trained_pipe")
-                or st.session_state.get("best_trained_pipe")
-            )
+            # Decide which pipeline to use for KPIs
+            use_best_for_perf = st.session_state.get("use_auto_pick", False)
+
+            if use_best_for_perf and "best_trained_pipe" in st.session_state:
+                # User explicitly wants Auto-Pick best model
+                pipe_for_kpi = st.session_state.get("best_trained_pipe")
+            else:
+                # Otherwise prefer user-trained model
+                pipe_for_kpi = (
+                    st.session_state.get("pipe")
+                    or st.session_state.get("trained_pipe")
+                )
 
             if pipe_for_kpi:
 
@@ -1895,16 +1948,32 @@ else:
                         "und spiegeln möglicherweise **nicht** die aktuellen Änderungen wider. "
                         "Bitte trainiere das Modell erneut."
                     )
+                    
+                # --- Decide which metrics to show ---
+                if use_best_for_perf and all(k in st.session_state for k in [
+                    "best_train_r2","best_test_r2","best_train_rmse","best_test_rmse",
+                    "best_train_mae","best_test_mae","best_train_mape","best_test_mape"
+                ]):
+                    # ✅ Show cached Auto-Pick metrics
+                    train_r2   = st.session_state.best_train_r2
+                    test_r2    = st.session_state.best_test_r2
+                    train_rmse = st.session_state.best_train_rmse
+                    test_rmse  = st.session_state.best_test_rmse
+                    train_mae  = st.session_state.best_train_mae
+                    test_mae   = st.session_state.best_test_mae
+                    train_mape = st.session_state.best_train_mape
+                    test_mape  = st.session_state.best_test_mape
+                else:
+                    # ✅ Fall back to last USER-trained metrics
+                    train_r2   = st.session_state.get("train_r2")
+                    test_r2    = st.session_state.get("test_r2")
+                    train_rmse = st.session_state.get("train_rmse")
+                    test_rmse  = st.session_state.get("test_rmse")
+                    train_mae  = st.session_state.get("train_mae")
+                    test_mae   = st.session_state.get("test_mae")
+                    train_mape = st.session_state.get("train_mape")
+                    test_mape  = st.session_state.get("test_mape")
 
-                # --- Use saved metric values from session_state ---
-                train_r2   = st.session_state.get("train_r2")
-                test_r2    = st.session_state.get("test_r2")
-                train_rmse = st.session_state.get("train_rmse")
-                test_rmse  = st.session_state.get("test_rmse")
-                train_mae  = st.session_state.get("train_mae")
-                test_mae   = st.session_state.get("test_mae")
-                train_mape = st.session_state.get("train_mape")
-                test_mape  = st.session_state.get("test_mape")
 
                 # ------------------------------
                 # Metric-Anzeige (restructured layout)
@@ -2151,7 +2220,7 @@ else:
                     st.error(f"Fehler beim Laden des gespeicherten Modells: {e}")
                     pipe_best = None
                     
-        # 🔎 DEBUG: check what features the model is actually trained on
+        # 🔎 Fallback: check what features the model is actually trained on
         if pipe_best is not None:
             st.write("Model features:", pipe_best.feature_names_in_)
 
@@ -2195,7 +2264,6 @@ else:
             else:
                 run_fc = st.button("▶️ Vorhersage jetzt ausführen", key="btn_run_forecast")
                 if run_fc:
-                    import numpy as np
 
                     history = df_slice.copy()
                     if "JahrMonat" not in history.columns or not pd.api.types.is_datetime64_any_dtype(history["JahrMonat"]):
@@ -2387,60 +2455,46 @@ else:
                     if sort_cols:
                         df_past_future = df_past_future.sort_values(sort_cols).reset_index(drop=True)
 
-                    # import plotly.express as px
-                    import plotly.graph_objects as go
 
                     fig = go.Figure()
+
                     chart_title = "Vergangenheit (6 Monate) & Prognose - Ausland vs. Inland"
 
-                    # Define colors for Ausland/Inland
-                    color_map = {
-                        "Ausland": "rgba(0, 128, 200, .4)",  # solid blue
-                        "Inland": "rgba(50, 120, 120, .4)"    # solid green
+                    # Style per (Aufenthaltsland, Typ)
+                    style_map = {
+                        ("Inland",  "Historie"): {"line": "#1f77b4", "fill": "rgba(31,119,180,0.60)", "dash": "solid"},  # default blue, 60%
+                        ("Ausland", "Historie"): {"line": "#8B0000", "fill": "rgba(178,34,34,0.50)",  "dash": "solid"},  # dark red, 50%
+                        ("Inland",  "Forecast"): {"line": "#7CD992", "fill": "rgba(144,160,44,0.60)",  "dash": "dash"},   # lighter green, 60%
+                        ("Ausland", "Forecast"): {"line": "#FFBF00", "fill": "rgba(255,191,80,0.50)",  "dash": "dash"},   # yellow, 50%
                     }
+                    default_style = {"line": "#1f77b4", "fill": "rgba(31,119,180,0.40)", "dash": "solid"}
 
-                    # Iterate over Aufenhaltsland × Typ combinations
-                    for land in df_past_future["Aufenthaltsland"].unique():
+                    # One trace per combo (uses fill directly → single legend item)
+                    for land in df_past_future["Aufenthaltsland"].dropna().unique():
                         for typ in ["Historie", "Forecast"]:
                             df_sub = df_past_future[
                                 (df_past_future["Aufenthaltsland"] == land) &
                                 (df_past_future["Typ"] == typ)
-                            ]
+                            ].sort_values("JahrMonat")
                             if df_sub.empty:
                                 continue
 
-                            # Adjust opacity for forecast (lighter)
-                            if typ == "Forecast":
-                                base_color = color_map[land].replace("1)", "0.4)")  # 50% opacity
-                            else:
-                                base_color = color_map[land]
-
-                            # Add line
+                            s = style_map.get((land, typ), default_style)
                             fig.add_trace(go.Scatter(
                                 x=df_sub["JahrMonat"],
                                 y=df_sub["value"],
                                 mode="lines",
                                 name=f"{land} - {typ}",
-                                line=dict(color=base_color, width=2, dash="solid" if typ=="Historie" else "dash")
-                            ))
-
-                            # Add filled area
-                            fig.add_trace(go.Scatter(
-                                x=df_sub["JahrMonat"],
-                                y=df_sub["value"],
-                                mode="lines",
-                                line=dict(width=0),
+                                line=dict(color=s["line"], width=2, dash=s["dash"]),
                                 fill="tozeroy",
-                                fillcolor=base_color.replace("1)", "0.2)"),  # lighter for shading
-                                showlegend=False,
-                                hoverinfo="skip"
+                                fillcolor=s["fill"],
                             ))
 
-                    # Add red vertical line to mark separation
-                    forecast_start = df_past_future.loc[df_past_future["Typ"]=="Forecast", "JahrMonat"].min()
-                    fig.add_vline(
-                        x=forecast_start, line_width=2, line_dash="solid", line_color="red"
-                    )
+                    # Red vertical line at forecast start (if available)
+                    if "JahrMonat" in df_past_future.columns:
+                        forecast_start = df_past_future.loc[df_past_future["Typ"]=="Forecast", "JahrMonat"].min()
+                        if pd.notna(forecast_start):
+                            fig.add_vline(x=forecast_start, line_width=2, line_dash="solid", line_color="red")
 
                     fig.update_layout(
                         title=chart_title,
@@ -2448,16 +2502,25 @@ else:
                         yaxis_title="Übernachtungen",
                         yaxis_tickformat=",",
                         height=500,
-                        template="plotly_dark"
+                        template="plotly_dark",
+                        hovermode="x unified",
+                        legend_title_text="",
                     )
-
-                    st.plotly_chart(fig, use_container_width=True)
-
+                    fig.update_xaxes(rangeslider_visible=True)
                     
                     # Save and display
                     st.session_state.future_df = future_df
-                    st.subheader("📊 Vergangenheit + Prognose (letzte 6 Monate + Horizont)")
-                    st.dataframe(df_past_future, width='stretch')
+                    st.session_state.df_past_future = df_past_future   #  persist combined past+forecast table
+                    st.session_state.forecast_fig = fig                #  persist chart
+            
+                    
+            # Always re-display persisted forecast if available
+            if "forecast_fig" in st.session_state:
+                st.plotly_chart(st.session_state.forecast_fig, use_container_width=True)
+
+            if "df_past_future" in st.session_state:
+                st.subheader("📊 Vergangenheit + Prognose (letzte 6 Monate + Horizont)")
+                st.dataframe(st.session_state.df_past_future, width='stretch')
 
                 
 
